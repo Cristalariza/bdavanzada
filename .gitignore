@@ -1,0 +1,31 @@
+# Archivos temporales de Office
+~$*
+
+# Estado interno de Claude Code (no compartir)
+.claude/
+
+# Capturas (suelen pesar mucho; subir solo las finales si el profe las pide)
+capturas/
+
+# Volúmenes Docker locales (nunca compartir datos)
+data/
+volumes/
+
+# Archivos de NiFi (estado, logs, conf con credenciales)
+nifi-templates/*.bak
+
+# Tableau temp
+*.twbr
+*.tbm
+
+# Visual Studio / SSAS
+ssas/**/bin/
+ssas/**/obj/
+ssas/**/.vs/
+*.user
+*.suo
+
+# Sistema operativo
+Thumbs.db
+.DS_Store
+desktop.ini

@@ -1,0 +1,2 @@
+# Coloca aquí tu DDL del Staging (ej. 01_staging_mysql.sql).
+# MySQL lo ejecuta automáticamente la primera vez que crea el volumen.

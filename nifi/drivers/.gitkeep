@@ -1,0 +1,4 @@
+# Descarga aquí los JDBC drivers:
+#   - mssql-jdbc-X.X.X.jre11.jar   (SQL Server)
+#   - mysql-connector-j-X.X.X.jar  (MySQL)
+# NiFi los lee desde /opt/nifi/nifi-current/extra-jars/ dentro del contenedor.

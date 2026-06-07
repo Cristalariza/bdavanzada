@@ -1,0 +1,144 @@
+# =============================================================================
+# Proyecto BI Northwind — orquestación Docker
+# Servidores 1, 2, 3 + Apache NiFi (ETL).
+# El Servidor 4 (SSAS Tabular) NO está aquí: corre nativo en Windows porque
+# Microsoft no publica imagen Docker de Analysis Services.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Servidor 1 — Fuente OLTP (SQL Server 2022 + Northwind)
+  # ---------------------------------------------------------------------------
+  source_sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: source_sqlserver
+    hostname: source_sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Northwind2026!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - bi_network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Servidor 2 — Staging Area (MySQL 8, espejo 1:1 de la fuente)
+  # ---------------------------------------------------------------------------
+  staging_mysql:
+    image: mysql:8.0
+    container_name: staging_mysql
+    hostname: staging_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "Northwind2026!"
+      MYSQL_DATABASE: "staging_northwind"
+      MYSQL_USER: "etl_user"
+      MYSQL_PASSWORD: "EtlUser2026!"
+    command:
+      - "mysqld"
+      - "--default-authentication-plugin=mysql_native_password"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    ports:
+      - "3307:3306"
+    volumes:
+      - staging_data:/var/lib/mysql
+      # Si pones archivos .sql aquí dentro, MySQL los ejecuta al crear la base
+      # (solo la primera vez que el volumen está vacío).
+      - ./sql/staging-init:/docker-entrypoint-initdb.d
+    networks:
+      - bi_network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Servidor 3 — Data Warehouse (MySQL 8, esquema estrella)
+  # ---------------------------------------------------------------------------
+  dw_mysql:
+    image: mysql:8.0
+    container_name: dw_mysql
+    hostname: dw_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "Northwind2026!"
+      MYSQL_DATABASE: "dw_northwind"
+      MYSQL_USER: "etl_user"
+      MYSQL_PASSWORD: "EtlUser2026!"
+    command:
+      - "mysqld"
+      - "--default-authentication-plugin=mysql_native_password"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--local-infile=1"
+    ports:
+      - "3306:3306"
+    volumes:
+      - dw_data:/var/lib/mysql
+      - ./sql/dw-init:/docker-entrypoint-initdb.d
+    networks:
+      - bi_network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # ETL — Apache NiFi 2.x
+  # Sin SSL para entorno de desarrollo. Usuario único: admin / NifiAdmin2026!
+  # ---------------------------------------------------------------------------
+  nifi:
+    image: apache/nifi:2.0.0
+    container_name: nifi
+    hostname: nifi
+    environment:
+      # Auth de usuario único (más simple que cero auth en 2.x)
+      SINGLE_USER_CREDENTIALS_USERNAME: "admin"
+      SINGLE_USER_CREDENTIALS_PASSWORD: "NifiAdmin2026!"
+      # Web UI
+      NIFI_WEB_HTTPS_PORT: "8443"
+      NIFI_WEB_HTTPS_HOST: "0.0.0.0"
+      # Java
+      NIFI_JVM_HEAP_INIT: "1g"
+      NIFI_JVM_HEAP_MAX: "2g"
+    ports:
+      - "8443:8443"
+    volumes:
+      - nifi_database:/opt/nifi/nifi-current/database_repository
+      - nifi_flowfile:/opt/nifi/nifi-current/flowfile_repository
+      - nifi_content:/opt/nifi/nifi-current/content_repository
+      - nifi_provenance:/opt/nifi/nifi-current/provenance_repository
+      - nifi_state:/opt/nifi/nifi-current/state
+      - nifi_logs:/opt/nifi/nifi-current/logs
+      - nifi_conf:/opt/nifi/nifi-current/conf
+      # Drivers JDBC: pon aquí mssql-jdbc-*.jar y mysql-connector-j-*.jar
+      - ./nifi/drivers:/opt/nifi/nifi-current/extra-jars
+    networks:
+      - bi_network
+    depends_on:
+      - source_sqlserver
+      - staging_mysql
+      - dw_mysql
+    restart: unless-stopped
+
+# =============================================================================
+# Red compartida — permite que los contenedores se vean por nombre
+# (NiFi usa: source_sqlserver:1433, staging_mysql:3306, dw_mysql:3306)
+# =============================================================================
+networks:
+  bi_network:
+    driver: bridge
+
+# =============================================================================
+# Volúmenes nombrados — los datos sobreviven a "docker compose down"
+# Para BORRAR los datos: docker compose down -v
+# =============================================================================
+volumes:
+  sqlserver_data:
+  staging_data:
+  dw_data:
+  nifi_database:
+  nifi_flowfile:
+  nifi_content:
+  nifi_provenance:
+  nifi_state:
+  nifi_logs:
+  nifi_conf:

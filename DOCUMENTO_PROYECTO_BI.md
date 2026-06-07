@@ -205,57 +205,215 @@ Script completo: **`scripts/02_bodega_dw_mysql.sql`**.
 
 ## 6. Modelo semántico SSAS Tabular (Plus +1)
 
-### 6.1 Por qué un modelo semántico
-El profesor reconoce **un punto adicional** si la solución pasa del modelo
-dimensional a un **modelo semántico con Tabular SSAS** y el visualizador se
-conecta a ese modelo (no al DW directo). Beneficios:
-- **Centraliza las medidas** (DAX) — todas las visualizaciones usan las mismas
-  fórmulas de "venta_neta", "% cumplimiento meta", etc.
-- **Rendimiento** — el motor VertiPaq comprime e indexa en memoria.
-- **Seguridad y gobierno** — un solo punto de definición de KPIs.
+> **Esta sección responde a tres preguntas:** ¿qué es el modelo dimensional que
+> ya construimos en MySQL? ¿qué es un modelo semántico y por qué agregar otra
+> capa encima del DW? ¿cómo se pasa del primero al segundo?
 
-### 6.2 Arquitectura del modelo
+### 6.1 Recordatorio — qué es el modelo dimensional (el que está en el DW)
+
+El **modelo dimensional** es el que construimos en MySQL DW (capítulo 5).
+Pertenece al **mundo de las bases de datos relacionales**: son tablas físicas
+con filas y columnas, conectadas por claves foráneas en un **esquema estrella**
+(una tabla de hechos central rodeada de dimensiones).
+
+Características clave del modelo dimensional:
+- Vive en un **motor relacional** (MySQL, SQL Server, PostgreSQL…).
+- Se consulta con **SQL** (`SELECT … FROM fact_ventas JOIN dim_cliente …`).
+- Es un **modelo de datos**: define qué columnas existen, sus tipos y cómo se
+  relacionan. **No define KPIs ni reglas de negocio.**
+- Cada herramienta que se conecta al DW (Tableau, Excel, Power BI…) tiene que
+  reescribir las fórmulas por su cuenta: cada analista calcula su propio
+  "venta neta", su propio "% cumplimiento de meta", su propio "YoY".
+
+**Problema típico que aparece cuando solo tienes el modelo dimensional:**
+- El gerente comercial calcula "ventas netas" en Excel como `precio × cantidad`,
+  sin descontar descuentos.
+- El analista financiero en Tableau resta los descuentos pero olvida los
+  productos descontinuados.
+- El director ve dos cifras distintas para lo mismo y nadie sabe cuál es
+  correcta.
+
+Esto se llama **"divergencia de métricas"** o **"single source of truth
+problem"**. El modelo dimensional resuelve el "dónde están los datos" pero no
+el "cómo se calculan los indicadores".
+
+> **Aclaración terminológica:** a veces se usa "modelo modular", "modelo
+> tabular dimensional" o "modelo estrella" para referirse a lo mismo. El
+> nombre técnico estándar (Kimball) es **modelo dimensional**.
+
+### 6.2 Qué es un modelo semántico
+
+Un **modelo semántico** es una **capa lógica encima del DW** que añade:
+
+1. **Definiciones de negocio reutilizables** (medidas/KPIs centralizadas).
+2. **Jerarquías** (Año › Trimestre › Mes › Día; País › Región › Ciudad).
+3. **Reglas de comportamiento** (qué medidas son aditivas, semiaditivas, no
+   aditivas; cómo se filtran; qué pasa al hacer drill-down).
+4. **Cálculos de inteligencia de tiempo** ("mismo periodo año anterior",
+   "acumulado del año", "promedio móvil 3 meses") sin que el usuario escriba
+   SQL.
+5. **Seguridad a nivel de fila** opcional ("este vendedor solo ve sus ventas").
+
+El modelo semántico **NO duplica los datos para reemplazarlos** — los importa
+desde el DW, los **comprime en memoria** y los expone a los visualizadores con
+un lenguaje propio: **DAX** (Data Analysis Expressions).
+
+| Aspecto | Modelo dimensional (DW) | Modelo semántico (SSAS Tabular) |
+|---|---|---|
+| **Dónde vive** | MySQL Servidor 3 (en disco) | SSAS Tabular Servidor 4 (en memoria, VertiPaq) |
+| **Lenguaje de consulta** | SQL | DAX / MDX |
+| **Qué contiene** | Tablas con datos | Tablas + medidas + jerarquías + relaciones marcadas + formato + reglas |
+| **Quién lo usa** | Cualquier cliente SQL (DBeaver, scripts) | Visualizadores BI (Tableau, Power BI, Excel) |
+| **Persistencia** | Permanente | Caché en memoria; se refresca cada vez que el ETL termina |
+| **KPIs definidos** | No (los calcula cada consumidor) | Sí (una única definición compartida) |
+| **Rol** | "Bodega": almacena la verdad | "Diccionario corporativo": la explica |
+
+### 6.3 Por qué construir un modelo semántico encima del DW
+
+Tres razones técnicas y una académica:
+
+**(1) Una sola definición por KPI ("single source of truth").**
+La medida "Ventas Netas" se escribe **una vez** en DAX dentro del modelo
+semántico. Tableau, Excel y cualquier futuro Power BI consumen la **misma**
+fórmula. Si mañana se decide que "Ventas Netas" debe excluir productos
+descontinuados, se cambia en un solo lugar y todas las visualizaciones se
+actualizan.
+
+**(2) Rendimiento con motor en memoria (VertiPaq).**
+SSAS Tabular usa el motor **VertiPaq**, el mismo de Power BI. Comprime las
+columnas con codificación tipo *dictionary encoding* + *run-length encoding* y
+las mantiene en RAM. Una agregación que en MySQL toma 3 segundos en VertiPaq
+toma 30-100 milisegundos. Sobre Northwind (datos pequeños) no se nota, pero
+es la razón por la que la industria lo adopta.
+
+**(3) Inteligencia de tiempo "gratis".**
+Funciones como `SAMEPERIODLASTYEAR`, `DATESYTD`, `PARALLELPERIOD` viven en DAX
+y solo funcionan correctamente cuando hay una tabla de tiempo marcada
+explícitamente en el modelo. Hacer "ventas YoY %" en SQL puro requiere joins
+y subconsultas complicadas; en DAX es una línea.
+
+**(4) Razón académica.**
+El profesor reconoce **un punto adicional (+1)** a los grupos que "pasan de un
+modelo dimensional a un modelo semántico con Tabular SSAS y el visualizador
+se conecta al modelo semántico para realizar los dashboards". Ese es el motivo
+por el cual incluimos el Servidor 4 en la arquitectura.
+
+### 6.4 Cómo se pasa del modelo dimensional al modelo semántico
+
+**Paso 1 — Origen.** El modelo semántico **NO reemplaza** al DW; lo usa como
+origen. El DW MySQL sigue existiendo, sigue siendo poblado por el ETL, sigue
+siendo la fuente de verdad histórica.
+
+**Paso 2 — Importación.** En Visual Studio creamos un proyecto **Tabular
+Model**. Mediante el conector **MySQL ODBC** apuntamos al DW y importamos las
+8 tablas analíticas (6 dimensiones + `dim_metas` + `fact_ventas`). El modelo
+toma una **copia** comprimida en memoria del Servidor 4.
+
+> No importamos `etl_control`, `fact_landing` ni `product_costos` porque son
+> tablas de soporte del ETL, no del análisis.
+
+**Paso 3 — Replicar las relaciones.** Las llaves foráneas del DW no se
+heredan automáticamente. En el diagrama del modelo Tabular se dibujan las
+7 relaciones (cada SK de `fact_ventas` a su dimensión + `dim_metas` a
+`dim_empleado`).
+
+**Paso 4 — Enriquecer con elementos semánticos.** Aquí ocurre la transformación
+real: el modelo deja de ser "tablas con datos" y se vuelve "modelo de negocio":
+- Marcar `dim_tiempo` como **Date Table** → habilita la inteligencia de tiempo.
+- Crear la **jerarquía Calendario**: Año › Trimestre › Mes › Día.
+- Ocultar columnas técnicas (SK, BKs) para que el usuario final solo vea las
+  útiles.
+- Escribir las **10 medidas DAX** (capítulo 6.6) que responden las preguntas
+  de negocio.
+- Aplicar formatos (moneda, porcentaje, decimales).
+
+**Paso 5 — Despliegue.** El proyecto se publica desde Visual Studio al
+Servidor 4 (`localhost\TABULAR`) como la base **`Northwind_Semantico`**. A
+partir de aquí cualquier visualizador puede conectarse a ella.
+
+**Paso 6 — Cambio de la conexión de Tableau.** Antes Tableau iba directo a
+MySQL DW (Servidor 3) y el analista escribía la lógica en cada hoja. Ahora
+Tableau usa el conector **Microsoft Analysis Services** apuntando a
+`localhost\TABULAR / Northwind_Semantico` y consume las medidas ya definidas
+en DAX. **Tableau deja de calcular: solo presenta.**
+
+**Paso 7 — Refresco.** Cada vez que el ETL corre y modifica el DW, se debe
+ejecutar un **Process Full** sobre la base SSAS Tabular para que la copia
+en memoria se actualice. Es un comando único desde SSMS o automatizable con
+un job. Mientras no haya refresco, Tableau ve la última foto.
+
+### 6.5 Arquitectura del modelo Tabular
+
 - **Motor:** SQL Server Analysis Services 2022, modo **Tabular**.
+- **Servidor:** instancia local `localhost\TABULAR`, puerto 2383.
+- **Compatibility level:** 1600 (SQL Server 2022 / Azure Analysis Services).
 - **Origen de datos del modelo:** MySQL DW (`localhost:3306/dw_northwind`) vía
-  conector **MySQL ODBC 8.x**.
-- **Modo de almacenamiento:** *Import* (VertiPaq) — el modelo guarda copia en
-  memoria; se refresca tras cada corrida del ETL.
+  conector **MySQL ODBC 8.x** y DSN de sistema `DW_NORTHWIND`.
+- **Modo de almacenamiento:** *Import* (VertiPaq) — el modelo guarda una copia
+  comprimida en memoria del DW; se refresca tras cada corrida del ETL.
 - **Tablas importadas:** las 6 dimensiones (`dim_tiempo`, `dim_cliente`,
   `dim_producto`, `dim_empleado`, `dim_geografia`, `dim_transportista`),
   `dim_metas` y `fact_ventas`.
-- **Relaciones:** una por cada FK del esquema estrella (fact ↔ dimensión por SK).
-- **Jerarquías:** `dim_tiempo` → Año › Trimestre › Mes › Día.
+- **Relaciones:** 7 en total — una por cada FK del esquema estrella
+  (`fact_ventas` ↔ cada dimensión) + `dim_metas` ↔ `dim_empleado`.
+- **Jerarquías:** `dim_tiempo` → **Calendario** (Año › Trimestre › Mes › Día).
+- **Tabla marcada como fecha:** `dim_tiempo[fecha]` (habilita SAMEPERIODLASTYEAR
+  y similares).
+- **Columnas ocultas al cliente:** todas las `*_sk` y BKs (`customer_id`,
+  `product_id`, `employee_id`, `shipper_id`).
 
-### 6.3 Medidas DAX principales
-Una medida por pregunta de negocio del capítulo 2 (definición conceptual; el
-estudiante las escribe en el modelo):
+### 6.6 Medidas DAX principales
+
+Una medida por pregunta de negocio del capítulo 2. Las fórmulas completas
+están en el documento [docs/FASE_06_MODELO_SEMANTICO_DAX.md](docs/FASE_06_MODELO_SEMANTICO_DAX.md);
+aquí su intención:
 
 | Medida | Pregunta | Idea DAX |
 |---|---|---|
 | `Ventas Netas` | 1, 2, 4, 6, 10 | `SUM(fact_ventas[venta_neta])` |
-| `Ventas YoY %` | 1 | Comparación contra `SAMEPERIODLASTYEAR` |
-| `Top10 Clientes` | 2 | `TOPN(10, ALL(dim_cliente), [Ventas Netas])` |
+| `Ventas Año Anterior` | 1 | `CALCULATE([Ventas Netas], SAMEPERIODLASTYEAR(dim_tiempo[fecha]))` |
+| `Ventas YoY %` | 1 | `DIVIDE([Ventas Netas] - [Ventas Año Anterior], [Ventas Año Anterior])` |
 | `Cantidad Vendida` | 3 | `SUM(fact_ventas[cantidad])` |
-| `% Contribución` | 3, 4 | `[Ventas Netas] / CALCULATE([Ventas Netas], ALL(...))` |
-| `Cumplimiento Meta %` | 5 | `[Ventas Netas] / [Meta Mensual]` |
-| `Días Entrega Promedio` | 7 | `AVERAGE(fact_ventas[dias_entrega])` |
+| `% Contribucion` | 3, 4 | `DIVIDE([Ventas Netas], CALCULATE([Ventas Netas], ALL(fact_ventas)))` |
+| `Meta Mensual` | 5 | `SUM(dim_metas[meta_mensual])` |
+| `Cumplimiento Meta %` | 5 | `DIVIDE([Ventas Netas], [Meta Mensual])` |
+| `Dias Entrega Promedio` | 7 | `AVERAGEX(FILTER(fact_ventas, NOT ISBLANK(...)), fact_ventas[dias_entrega])` |
 | `Margen` | 8 | `SUM(fact_ventas[margen])` |
-| `Clientes Inactivos` | 9 | conteo con `MAX(fecha)` < hoy − 365 |
-| `Ventas Mismo Mes Año Ant.` | 10 | `CALCULATE([Ventas Netas], SAMEPERIODLASTYEAR(...))` |
+| `Clientes Activos` / `Inactivos` | 9 | `DISTINCTCOUNT` sobre últimos 365 días |
 
-### 6.4 Herramientas para construir el modelo
-- **Visual Studio 2022** con la extensión *Microsoft Analysis Services Projects*
-  (proyecto **Tabular Model Project**, *compatibility level 1600*).
-- (Alternativa recomendada) **Tabular Editor 2** (gratuito) para escribir las
-  medidas DAX más cómodamente y desplegar al servidor SSAS.
+### 6.7 Herramientas para construir el modelo
 
-### 6.5 Despliegue
-El proyecto Tabular se despliega al Servidor 4 (`localhost\TABULAR`, puerto 2383)
-con el nombre de base de datos **`Northwind_Semantico`**.
+- **Visual Studio 2022 Community** con la extensión *Microsoft Analysis Services
+  Projects* (proyecto **Tabular Model Project**, *compatibility level 1600*).
+  Es donde se importan tablas, se definen relaciones, se crean jerarquías y
+  se despliega.
+- **Tabular Editor 2** (gratuito, recomendado). Editor especializado en DAX,
+  mucho más rápido que el editor por defecto de Visual Studio para escribir
+  y refactorizar medidas.
+- **SQL Server Management Studio (SSMS)** para administración: probar consultas
+  DAX/MDX sobre el modelo desplegado y ejecutar el *Process Full*.
+
+### 6.8 Despliegue y refresco
+
+El proyecto Tabular se despliega al Servidor 4 (`localhost\TABULAR`,
+puerto 2383) con el nombre de base de datos **`Northwind_Semantico`**.
+
+Ciclo operativo completo después de cada ETL:
+
+```
+ETL (NiFi) actualiza DW MySQL
+       │
+       ▼
+SSMS → click derecho sobre Northwind_Semantico → Process Full
+       │
+       ▼
+Tableau → Data → Refresh (o reabrir el .twb)
+```
 
 [CAPTURA: modelo Tabular en Visual Studio (diagrama de tablas y relaciones)]
 [CAPTURA: Tabular Editor con las medidas DAX]
 [CAPTURA: SQL Server Management Studio conectado a la instancia SSAS Tabular mostrando la base desplegada]
+[CAPTURA: Tableau conectado al modelo semántico mostrando las medidas DAX en el panel]
 
 ---
 

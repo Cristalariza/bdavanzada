@@ -6,23 +6,24 @@
 
 ---
 
-## Paso 1 — Colocar los drivers JDBC para NiFi
+## Paso 1 — Verificar drivers JDBC en NiFi
 
-NiFi necesita los drivers de SQL Server y MySQL para conectarse. El contenedor los lee desde `/opt/nifi/nifi-current/extra-jars/`, que está mapeado a la carpeta local `nifi\drivers\`.
+El script `setup_containers.ps1` de la Fase 0 ya descargó los drivers a `nifi\drivers\` y los montó en el contenedor en `/opt/nifi/nifi-current/extra-jars/`. Validar:
 
-1.1. Verifica que existan los dos `.jar` en `C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD\nifi\drivers\`:
-   - `mssql-jdbc-X.X.X.jre11.jar`
-   - `mysql-connector-j-X.X.X.jar`
-1.2. Si no los tienes, descárgalos:
-   - **SQL Server JDBC:** https://learn.microsoft.com/en-us/sql/connect/jdbc/download-microsoft-jdbc-driver-for-sql-server → ZIP → extrae solo el `.jre11.jar` o `.jre17.jar`.
-   - **MySQL JDBC:** https://dev.mysql.com/downloads/connector/j/ → "Platform Independent" ZIP → extrae el `.jar`.
-1.3. Cópialos a la carpeta `nifi\drivers\`.
-1.4. **Reinicia el contenedor NiFi** para que detecte los nuevos archivos:
+1.1. Confirma que existen:
+   ```powershell
+   dir nifi\drivers
+   ```
+   Debes ver `mssql-jdbc-*.jar` y `mysql-connector-j-*.jar`.
+1.2. Confirma que NiFi los ve por dentro:
+   ```powershell
+   docker exec nifi ls -la /opt/nifi/nifi-current/extra-jars/
+   ```
+1.3. Si descargaste los drivers DESPUÉS de que el contenedor arrancara, reinícialo:
    ```powershell
    docker compose restart nifi
    ```
-1.5. Espera 2-3 minutos a que NiFi vuelva a estar listo.
-1.6. **CAPTURA:** explorador mostrando los 2 `.jar` en `nifi\drivers\`.
+1.4. **CAPTURA:** salida del `docker exec`.
 
 ---
 

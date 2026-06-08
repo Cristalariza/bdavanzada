@@ -41,30 +41,21 @@ source_sqlserver:
 
 ---
 
-## Paso 2 — Levantar solo el contenedor de SQL Server
+## Paso 2 — Verificar que SQL Server está corriendo
 
-En esta fase solo arrancamos `source_sqlserver`. Los demás los iremos levantando en sus respectivas fases.
+Si ejecutaste `scripts\setup_containers.ps1` en la Fase 0, el contenedor ya está arriba. Validar:
 
-2.1. Abre PowerShell y navega a la carpeta del proyecto:
-```powershell
-cd C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD
-```
-2.2. Levanta SOLO el servicio que necesitas:
-```powershell
-docker compose up -d source_sqlserver
-```
-2.3. Espera 30-60 segundos. La primera vez descarga la imagen (~1.5 GB).
-2.4. Verifica que está corriendo:
-```powershell
-docker ps
-```
-Debes ver una línea con `source_sqlserver` en estado `Up X seconds`.
-2.5. Mira los logs por si hay errores:
-```powershell
-docker logs source_sqlserver --tail 20
-```
-La última línea útil debe ser algo como `SQL Server is now ready for client connections`.
-2.6. **CAPTURA:** la salida de `docker ps`.
+2.1. En PowerShell:
+   ```powershell
+   docker ps --filter "name=source_sqlserver"
+   docker logs source_sqlserver --tail 10
+   ```
+2.2. El log debe terminar con `SQL Server is now ready for client connections`.
+2.3. Si no está corriendo, levántalo:
+   ```powershell
+   docker compose up -d source_sqlserver
+   ```
+2.4. **CAPTURA:** salida de `docker ps`.
 
 ---
 

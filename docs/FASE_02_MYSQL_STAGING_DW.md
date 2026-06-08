@@ -58,18 +58,18 @@ Para esta guía vamos a crear las tablas **manualmente desde DBeaver** (Pasos 4 
 
 ---
 
-## Paso 2 — Levantar los dos MySQL
+## Paso 2 — Verificar los dos MySQL
 
-2.1. En PowerShell, en la carpeta del proyecto:
-```powershell
-docker compose up -d staging_mysql dw_mysql
-```
-2.2. La primera vez descarga la imagen `mysql:8.0` (~600 MB).
-2.3. Espera ~60 segundos y ejecuta:
-```powershell
-docker ps
-```
-Debes ver **3 contenedores corriendo**: `source_sqlserver` (de Fase 1), `staging_mysql`, `dw_mysql`.
+Ya corren desde el bootstrap de Fase 0. Validar:
+
+2.1. En PowerShell:
+   ```powershell
+   docker ps --filter "name=staging_mysql" --filter "name=dw_mysql"
+   ```
+2.2. Si alguno falta, levántalo:
+   ```powershell
+   docker compose up -d staging_mysql dw_mysql
+   ```
 2.4. Inspecciona los puertos:
 ```powershell
 docker port staging_mysql

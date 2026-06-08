@@ -1,87 +1,64 @@
 # Fase 0 — Preparación del ambiente
 
-**Objetivo:** dejar la máquina lista con todo el software base instalado antes de tocar contenedores, bases de datos o ETL.
-**Tiempo estimado:** 1 hora.
-**Prerrequisitos:** Windows 10/11 con permisos de administrador y al menos 16 GB de RAM.
+**Objetivo:** dejar la máquina lista. Como ya tienes Docker funcionando, esto es bootstrapear los contenedores con un script y luego instalar lo poco que **no** puede vivir en Docker (cliente DB, Tableau, etc.).
+**Tiempo estimado:** 30 minutos.
+**Prerrequisitos:** Docker Desktop corriendo. Cliente PowerShell.
 
 ---
 
 ## Convenciones del proyecto
 
-Voy a usar estas constantes en TODOS los documentos siguientes. Anótalas:
-
 | Concepto | Valor |
 |---|---|
 | Contraseña SQL Server (`sa`) | `Northwind2026!` |
-| Contraseña MySQL (`root`) | `Northwind2026!` |
-| Contraseña SSAS (auth Windows) | tu usuario Windows |
+| Contraseña MySQL (`root` / `etl_user`) | `Northwind2026!` / `EtlUser2026!` |
+| Contraseña NiFi UI | `admin` / `NifiAdmin2026!` |
+| Contraseña SSAS | autenticación Windows (tu usuario) |
 | Ruta del proyecto | `C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD\` |
 | Carpeta de capturas | `<RUTA_PROYECTO>\capturas\<NUMERO_FASE>\` |
 
 ---
 
-## Paso 1 — Verificar requisitos de Windows
+## Paso 1 — Verificar Docker
 
-1.1. Abre **PowerShell** (NO administrador todavía).
-1.2. Escribe `winver` y presiona Enter. Debe abrirse una ventana mostrando "Windows 11" o "Windows 10 versión 21H2 o superior".
-1.3. Cierra esa ventana.
-1.4. En PowerShell escribe `systeminfo | findstr /B /C:"Total Physical Memory"`. Debe mostrar **al menos 16 GB**. Si tienes 8 GB el proyecto correrá lento pero funcional; si tienes menos, considera otro equipo.
-1.5. **CAPTURA:** la ventana de `winver` + la línea de memoria.
-
----
-
-## Paso 2 — Habilitar WSL2
-
-WSL2 es lo que Docker Desktop usa por debajo para correr los contenedores Linux.
-
-2.1. Cierra PowerShell y vuelve a abrirlo **como Administrador** (clic derecho → "Ejecutar como administrador").
-2.2. Ejecuta:
-```
-wsl --install
-```
-2.3. Si dice "ya está instalado", ejecuta:
-```
-wsl --set-default-version 2
-wsl --update
-```
-2.4. Reinicia el equipo si te lo pide.
-2.5. Tras reiniciar, abre PowerShell normal y ejecuta `wsl --status`. Debe decir "Default Version: 2".
-2.6. **CAPTURA:** la salida de `wsl --status`.
+1.1. Abre PowerShell.
+1.2. Ejecuta:
+   ```powershell
+   docker info | Select-String "Server Version"
+   ```
+   Debe imprimir una línea con la versión. Si da error, abre Docker Desktop y espera a que el ícono de ballena diga "Engine running".
 
 ---
 
-## Paso 3 — Instalar Docker Desktop
+## Paso 2 — Ejecutar el bootstrap (descarga drivers + levanta contenedores)
 
-3.1. Ve a https://www.docker.com/products/docker-desktop/ y descarga el instalador para Windows.
-3.2. Ejecuta el `.exe`. Cuando pregunte, **marca** "Use WSL 2 instead of Hyper-V".
-3.3. Acepta y deja que termine. Te pedirá cerrar sesión o reiniciar — hazlo.
-3.4. Al iniciar Docker Desktop por primera vez, salta el tutorial.
-3.5. Ve a **Settings (engranaje) → General** y verifica que esté marcado "Use the WSL 2 based engine".
-3.6. Ve a **Settings → Resources → Advanced** y asigna:
-   - **Memory:** mínimo 8 GB (recomendado 10 GB si tienes 16 GB).
-   - **CPUs:** mínimo 4.
-   - **Disk image size:** 60 GB.
-3.7. Clic en **Apply & Restart**.
-3.8. En PowerShell, ejecuta:
-```
-docker --version
-docker run hello-world
-```
-La segunda línea debe imprimir "Hello from Docker!". Si falla, espera a que Docker Desktop termine de arrancar (ícono ballena en bandeja del sistema, ojo a que diga "Engine running").
-3.9. **CAPTURA:** la salida de `docker --version` y el "Hello from Docker!".
+2.1. Desde la raíz del proyecto, en PowerShell:
+   ```powershell
+   .\scripts\setup_containers.ps1
+   ```
+2.2. El script hace TODO esto por ti:
+   - Descarga `mssql-jdbc-12.8.1.jre11.jar` y `mysql-connector-j-8.4.0.jar` a `nifi\drivers\` (solo si faltan).
+   - `docker compose pull` para imágenes al día.
+   - `docker compose up -d` (levanta los 4 contenedores).
+   - Espera 30 s y muestra el estado final con `docker ps`.
 
----
+2.3. **Si PowerShell bloquea el script** por política de ejecución, una sola vez:
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+   ```
+   y reintenta.
 
-## Paso 4 — Descargar drivers JDBC para NiFi
+2.4. Al final debes ver los 4 contenedores en estado `Up`:
+   ```
+   NAMES               STATUS              PORTS
+   source_sqlserver    Up X minutes        0.0.0.0:1433->1433/tcp
+   staging_mysql       Up X minutes        0.0.0.0:3307->3306/tcp
+   dw_mysql            Up X minutes        0.0.0.0:3306->3306/tcp
+   nifi                Up X minutes        0.0.0.0:8443->8443/tcp
+   ```
+2.5. **CAPTURA:** salida del script + `docker ps`.
 
-NiFi corre dentro de un contenedor Docker (lo levantaremos en la Fase 1) pero necesita los drivers JDBC para hablar con SQL Server y MySQL. Esos drivers se montan al contenedor desde la carpeta local `nifi\drivers\`.
-
-> **Ya NO necesitas:** instalar Java 21 ni descargar el binario de NiFi. Todo eso vive dentro del contenedor `nifi` declarado en `docker-compose.yml`.
-
-4.1. **SQL Server JDBC:** ve a https://learn.microsoft.com/en-us/sql/connect/jdbc/download-microsoft-jdbc-driver-for-sql-server y descarga el ZIP del driver más reciente. Extrae solamente el archivo `mssql-jdbc-X.X.X.jre11.jar` (o `jre17.jar`) a `<RUTA_PROYECTO>\nifi\drivers\`.
-4.2. **MySQL JDBC:** ve a https://dev.mysql.com/downloads/connector/j/ y descarga "Platform Independent" (ZIP). Extrae `mysql-connector-j-X.X.X.jar` a `<RUTA_PROYECTO>\nifi\drivers\`.
-4.3. Verifica que en `nifi\drivers\` haya 2 archivos `.jar`.
-4.4. **CAPTURA:** explorador mostrando los dos `.jar`.
+> NiFi tarda **2-3 minutos adicionales** en estar accesible vía web después de aparecer como `Up`. Es normal.
 
 ---
 
@@ -149,13 +126,14 @@ PROYECTOBD\
 
 Antes de pasar a la Fase 1 verifica que **TODO** esté en verde:
 
-- [ ] `wsl --status` muestra "Default Version: 2"
-- [ ] `docker run hello-world` funciona
-- [ ] `nifi\drivers\` tiene 2 `.jar` (SQL Server + MySQL)
+- [ ] `docker info` responde
+- [ ] `setup_containers.ps1` ejecutado sin errores
+- [ ] 4 contenedores corriendo (`docker ps`)
+- [ ] `nifi\drivers\` tiene 2 `.jar` (descargados por el script)
 - [ ] DBeaver abre sin error
 - [ ] Tableau Desktop instalado (con trial o licencia)
 - [ ] `sql\instnwnd.sql` descargado
 - [ ] Estructura de carpetas del proyecto creada
-- [ ] 7 capturas guardadas en `capturas\00\`
+- [ ] Capturas guardadas en `capturas\00\`
 
 Cuando esté listo, avísame con **"Fase 0 lista"** y pasamos a la Fase 1.

@@ -49,7 +49,7 @@ local en Windows (servicio aparte), para un total de cuatro servidores.
 
 | Servidor | Motor | Rol | Puerto | Regla |
 |---|---|---|---|---|
-| Servidor 1 | SQL Server 2022 (Docker) | Fuente / OLTP (Northwind) | 1433 | NiFi solo **lee** |
+| Servidor 1 | SQL Server 2022 (Docker) | Fuente / OLTP (Northwind) | **14333** (host) / 1433 (interno) | NiFi solo **lee** |
 | Servidor 2 | MySQL 8 (Docker) | Staging | 3307 | Copia **cruda 1:1**, sin transformar |
 | Servidor 3 | MySQL 8 (Docker) | Data Warehouse | 3306 | Esquema estrella |
 | Servidor 4 | SSAS Tabular (Windows) | Modelo semántico | 2383 | Lee del DW, expone a Tableau |
@@ -522,7 +522,7 @@ de negocio:
 3. `docker compose up -d` y validar con `docker ps` (3 contenedores).
 
 ### A.3 Cargar Northwind (Servidor 1)
-1. Conectar a `localhost,1433` (usuario `sa`).
+1. Conectar a `localhost,14333` (usuario `sa`). Puerto host 14333 mapeado al interno 1433.
 2. Ejecutar el script `instnwnd.sql` (Northwind para SQL Server).
 3. Validar: `SELECT COUNT(*) FROM Customers;` → 91.
 

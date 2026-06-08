@@ -157,7 +157,7 @@ try {
 
     Write-Host ""
     Write-Host "==> Endpoints:" -ForegroundColor Cyan
-    Write-Host "    SQL Server : localhost:1433  (sa / Northwind2026!)"
+    Write-Host "    SQL Server : localhost:14333 (sa / Northwind2026!)"
     Write-Host "    MySQL Stg  : localhost:3307  (root / Northwind2026!)"
     Write-Host "    MySQL DW   : localhost:3306  (root / Northwind2026!)"
     Write-Host "    NiFi UI    : https://localhost:8443/nifi  (admin / NifiAdmin2026!)"

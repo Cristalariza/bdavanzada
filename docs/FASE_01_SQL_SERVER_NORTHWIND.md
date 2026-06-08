@@ -65,7 +65,7 @@ Si ejecutaste `scripts\setup_containers.ps1` en la Fase 0, el contenedor ya est�
 3.2. **Database → New Database Connection** → busca y selecciona **SQL Server** → Next.
 3.3. Llena:
    - **Server Host:** `localhost`
-   - **Port:** `1433`
+   - **Port:** `14333`  ← OJO: el puerto externo es 14333 (no 1433), para evitar choque con SQL Server local si lo tienes.
    - **Database/Schema:** déjalo vacío por ahora
    - **Authentication:** `SQL Server Authentication`
    - **Username:** `sa`

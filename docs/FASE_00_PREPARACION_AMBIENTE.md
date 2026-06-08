@@ -10,6 +10,7 @@
 
 | Concepto | Valor |
 |---|---|
+| Puerto SQL Server (host) | `14333` (interno 1433; cambiado para evitar choque con SQL Server local) |
 | Contraseña SQL Server (`sa`) | `Northwind2026!` |
 | Contraseña MySQL (`root` / `etl_user`) | `Northwind2026!` / `EtlUser2026!` |
 | Contraseña NiFi UI | `admin` / `NifiAdmin2026!` |
@@ -51,7 +52,7 @@
 2.4. Al final debes ver los 4 contenedores en estado `Up`:
    ```
    NAMES               STATUS              PORTS
-   source_sqlserver    Up X minutes        0.0.0.0:1433->1433/tcp
+   source_sqlserver    Up X minutes        0.0.0.0:14333->1433/tcp
    staging_mysql       Up X minutes        0.0.0.0:3307->3306/tcp
    dw_mysql            Up X minutes        0.0.0.0:3306->3306/tcp
    nifi                Up X minutes        0.0.0.0:8443->8443/tcp

@@ -19,7 +19,7 @@ services:
       MSSQL_SA_PASSWORD: "Northwind2026!"
       MSSQL_PID: "Developer"
     ports:
-      - "1433:1433"
+      - "14333:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
     networks:

@@ -120,23 +120,37 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "docker compose up -d falló." }
 
     Write-Host ""
-    Write-Host "      Esperando a que MySQL acepte conexiones (hasta 2 min)..." -ForegroundColor Yellow
+    Write-Host "      Esperando a que los servicios acepten conexiones..." -ForegroundColor Yellow
 
-    foreach ($svc in @("staging_mysql", "dw_mysql")) {
+    # SQL Server: busca "SQL Server is now ready for client connections"
+    # MySQL:      busca "ready for connections"
+    # NiFi:       no se valida aquí porque tarda 2-3 min (solo se reporta al final)
+    $checks = @(
+        @{ Svc = "source_sqlserver"; Ready = "ready for client connections"; Bad = "Login failed for user" },
+        @{ Svc = "staging_mysql";    Ready = "ready for connections";        Bad = "Cannot create redo log files|Aborting" },
+        @{ Svc = "dw_mysql";         Ready = "ready for connections";        Bad = "Cannot create redo log files|Aborting" }
+    )
+
+    foreach ($c in $checks) {
+        $svc = $c.Svc
         $ready = $false
         for ($i = 0; $i -lt 60; $i++) {
-            $log = docker logs $svc --tail 10 2>&1 | Out-String
-            if ($log -match "ready for connections" -and $log -notmatch "Aborting") {
+            $log = docker logs $svc --tail 20 2>&1 | Out-String
+            if ($log -match $c.Ready) {
                 Write-Host "      $svc OK." -ForegroundColor Green
                 $ready = $true
                 break
             }
-            if ($log -match "Cannot create redo log files|Aborting") {
+            if ($log -match $c.Bad) {
                 Write-Host ""
-                Write-Host "      $svc FALLA: volumen corrupto de un intento anterior." -ForegroundColor Red
-                Write-Host "      Solución: vuelve a correr así:" -ForegroundColor Red
-                Write-Host "          .\scripts\setup_containers.ps1 -Reset" -ForegroundColor Red
-                throw "MySQL no pudo arrancar (volumen corrupto)."
+                if ($svc -like "*mysql*") {
+                    Write-Host "      $svc FALLA: volumen corrupto de un intento anterior." -ForegroundColor Red
+                    Write-Host "      Solución: vuelve a correr así:" -ForegroundColor Red
+                    Write-Host "          .\scripts\setup_containers.ps1 -Reset" -ForegroundColor Red
+                } else {
+                    Write-Host "      $svc FALLA: revisa el log con 'docker logs $svc'." -ForegroundColor Red
+                }
+                throw "$svc no pudo arrancar."
             }
             Start-Sleep -Seconds 2
         }

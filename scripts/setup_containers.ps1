@@ -17,7 +17,11 @@
 #   - Instalar Docker, DBeaver, Tableau, SSAS, Visual Studio.
 # =============================================================================
 
-$ErrorActionPreference = "Stop"
+# Importante: usamos 'Continue' (no 'Stop') porque en PowerShell 5.1 cualquier
+# stderr de un comando nativo (ej. los warnings de 'docker info') se convierte
+# en NativeCommandError y abortaría el script. Validamos cada paso por
+# $LASTEXITCODE manualmente.
+$ErrorActionPreference = "Continue"
 
 # Posicionarse en la raíz del proyecto sin importar desde dónde se llame.
 Push-Location (Join-Path $PSScriptRoot "..")
@@ -46,7 +50,7 @@ try {
 
     # --- 1. Verificar Docker --------------------------------------------------
     Write-Host "[1/6] Verificando Docker..." -ForegroundColor Yellow
-    $dockerInfo = docker info 2>&1 | Out-String
+    docker info --format "{{.ServerVersion}}" > $null 2> $null
     if ($LASTEXITCODE -ne 0) {
         throw "Docker no responde. Abre Docker Desktop, espera a 'Engine running' y reintenta."
     }

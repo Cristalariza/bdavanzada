@@ -2,7 +2,9 @@
 
 **Objetivo:** mover datos del Staging al Data Warehouse aplicando todas las transformaciones (joins, desnormalización, llaves sustitutas, cálculo de medidas, metas, geografía).
 **Tiempo estimado:** 3 horas (puede dividirse en 2 sesiones).
-**Prerrequisitos:** Fase 3 completada (Staging poblado con datos correctos).
+**Prerrequisitos:** Fase 3 completada (Staging poblado con datos correctos, 5 Controller Services Enabled).
+
+> **Importante (NiFi 2.x):** seguimos el mismo enfoque **record-oriented** de la Fase 3. `ExecuteSQLRecord` con `JsonWriter` produce JSON directamente, no hace falta `ConvertAvroToJSON`. Para transformaciones SQL "puras" dentro del DW seguimos usando `PutSQL`.
 
 ---
 
@@ -30,90 +32,126 @@
                               └────────────────────────────┘
 ```
 
-> **Por qué este orden:** Las dimensiones deben existir ANTES de resolver las surrogate keys del hecho. fact_landing es una zona intermedia con BKs (no SKs); el último paso hace los joins BK→SK dentro del DW.
+> **Por qué este orden:** las dimensiones deben existir ANTES de resolver las surrogate keys del hecho. `fact_landing` es una zona intermedia con BKs (no SKs); el último paso hace los joins BK→SK dentro del DW.
 
 ---
 
 ## Paso 1 — Crear el Process Group "Pipeline 2"
 
-1.1. En NiFi, regresa al lienzo raíz (botón "Back to Parent").
+1.1. En NiFi, regresa al lienzo raíz ("Back to Parent").
 1.2. Arrastra un Process Group → Nombre: `Pipeline 2 - Staging a DW`.
 1.3. Doble clic para entrar.
+
+> Reutilizamos los 5 Controller Services creados en Fase 3 (`SQLServer-Northwind-Reader`, `MySQL-Staging`, `MySQL-DW`, `JsonWriter`, `JsonReader`). No hay que crear nada nuevo.
 
 ---
 
 ## Paso 2 — Cargar `dim_cliente`
 
-### 2.A — TRUNCATE primero
+Patrón del subflujo (4 procesadores):
 
-2.A.1. **GenerateFlowFile** → Name: `Trigger dim_cliente` → File Size `0B` → Run Schedule `999 days`.
-2.A.2. **PutSQL** (pool `MySQL-DW`) → SQL Statement:
-   ```sql
-   SET FOREIGN_KEY_CHECKS=0; TRUNCATE TABLE dim_cliente; SET FOREIGN_KEY_CHECKS=1;
-   ```
-   Name: `TRUNCATE dim_cliente`.
+```
+Trigger → TRUNCATE dim_cliente → EXTRACT stg_customers → LOAD dim_cliente
+```
 
-> **Nota FK:** desactivamos checks porque fact_ventas tiene FK a dim_cliente. En producción se haría con TRUNCATE CASCADE o eliminando hechos primero. Para esta carga inicial es seguro porque limpiamos el hecho después también.
+### 2.A — `GenerateFlowFile`: trigger
 
-### 2.B — Extraer del Staging
+2.A.1. Arrastra **Processor → GenerateFlowFile**.
+2.A.2. Properties: `File Size = 0B`.
+2.A.3. Scheduling → Run Schedule: `999 days`.
+2.A.4. Name: `Trigger dim_cliente`.
 
-2.B.1. **ExecuteSQL** (pool `MySQL-Staging`) → Query:
-   ```sql
-   SELECT
-     CustomerID  AS customer_id,
-     CompanyName AS company_name,
-     ContactName AS contact_name,
-     City        AS city,
-     Country     AS country
-   FROM stg_customers
-   ```
-   Name: `EXTRACT stg_customers → dim_cliente`.
+### 2.B — `PutSQL`: vaciar tabla destino
 
-2.B.2. **ConvertAvroToJSON** → Name: `Avro→JSON cliente`.
+2.B.1. Arrastra **Processor → PutSQL**.
+2.B.2. Properties:
 
-### 2.C — Cargar en DW
+| Property | Value |
+|---|---|
+| JDBC Connection Pool | `MySQL-DW` |
+| SQL Statement | `SET FOREIGN_KEY_CHECKS=0; TRUNCATE TABLE dim_cliente; SET FOREIGN_KEY_CHECKS=1;` |
 
-2.C.1. **PutDatabaseRecord** (pool `MySQL-DW`):
-   - Statement Type: `INSERT`
-   - Schema Name: `dw_northwind`
-   - Table Name: `dim_cliente`
-   - Translate Field Names: `true`
-   - Unmatched Field/Column Behavior: `Ignore`
-   - Record Reader: `JsonTreeReader` (el mismo de Pipeline 1)
-   - Name: `LOAD dim_cliente`.
+2.B.3. Name: `TRUNCATE dim_cliente`. Auto-terminate: `failure`, `retry`.
 
-2.C.2. Conecta los 4 procesadores en cadena.
+> **FK checks:** los desactivamos porque `fact_ventas` tiene FK a `dim_cliente`. Es seguro porque vamos a limpiar y recargar todo el hecho al final.
 
-### 2.D — Probar
+### 2.C — `ExecuteSQLRecord`: extraer del Staging como JSON
 
-2.D.1. Start + Run Once en `Trigger dim_cliente`.
-2.D.2. En DBeaver (DW):
-   ```sql
-   SELECT COUNT(*) FROM dim_cliente;  -- esperado: 91
-   SELECT * FROM dim_cliente LIMIT 5;
-   ```
-2.D.3. **CAPTURA:** subflujo + resultado.
+2.C.1. Arrastra **Processor → ExecuteSQLRecord**.
+2.C.2. Properties:
+
+| Property | Value |
+|---|---|
+| Database Connection Pooling Service | `MySQL-Staging` |
+| Record Writer | `JsonWriter` |
+| SQL select query | (ver abajo) |
+| Max Rows Per Flow File | `0` |
+| Normalize Table/Column Names | `false` |
+
+SQL:
+```sql
+SELECT
+  CustomerID  AS customer_id,
+  CompanyName AS company_name,
+  ContactName AS contact_name,
+  City        AS city,
+  Country     AS country
+FROM stg_customers
+```
+
+2.C.3. Name: `EXTRACT stg_customers → dim_cliente`. Auto-terminate: `failure`.
+
+### 2.D — `PutDatabaseRecord`: cargar DW
+
+2.D.1. Arrastra **Processor → PutDatabaseRecord**.
+2.D.2. Properties:
+
+| Property | Value |
+|---|---|
+| Record Reader | `JsonReader` |
+| Statement Type | `INSERT` |
+| Database Connection Pooling Service | `MySQL-DW` |
+| Schema Name | `dw_northwind` |
+| Table Name | `dim_cliente` |
+| Translate Field Names | `true` |
+| Unmatched Field Behavior | `Ignore Unmatched Fields` |
+| Unmatched Column Behavior | `Ignore Unmatched Columns` |
+
+2.D.3. Name: `LOAD dim_cliente`. Auto-terminate: `success`, `failure`, `retry`.
+
+### 2.E — Conectar y probar
+
+2.E.1. Conecta: Trigger → TRUNCATE → EXTRACT → LOAD (todos por `success`).
+2.E.2. Start sobre los 4 procesadores → Run Once en `Trigger dim_cliente`.
+2.E.3. Valida en DBeaver (DW):
+```sql
+SELECT COUNT(*) FROM dim_cliente;  -- esperado: 91
+SELECT * FROM dim_cliente LIMIT 5;
+```
+2.E.4. **CAPTURA:** subflujo + resultado.
 
 ---
 
 ## Paso 3 — Cargar `dim_producto` (con desnormalización)
 
-3.1. Trigger + TRUNCATE igual que en paso 2.
-3.2. **ExecuteSQL** (pool `MySQL-Staging`):
-   ```sql
-   SELECT
-     p.ProductID        AS product_id,
-     p.ProductName      AS product_name,
-     c.CategoryName     AS category_name,
-     s.CompanyName      AS supplier_name,
-     s.Country          AS supplier_country,
-     p.UnitPrice        AS unit_price,
-     p.Discontinued     AS discontinued
-   FROM stg_products p
-   LEFT JOIN stg_categories c ON c.CategoryID = p.CategoryID
-   LEFT JOIN stg_suppliers  s ON s.SupplierID = p.SupplierID
-   ```
-3.3. Avro→JSON + PutDatabaseRecord (`dim_producto`).
+Mismo patrón de 4 procesadores. Cambia el query y el destino.
+
+3.1. Trigger + TRUNCATE igual que el paso 2.
+3.2. **ExecuteSQLRecord** (pool `MySQL-Staging`, writer `JsonWriter`):
+```sql
+SELECT
+  p.ProductID    AS product_id,
+  p.ProductName  AS product_name,
+  c.CategoryName AS category_name,
+  s.CompanyName  AS supplier_name,
+  s.Country      AS supplier_country,
+  p.UnitPrice    AS unit_price,
+  p.Discontinued AS discontinued
+FROM stg_products p
+LEFT JOIN stg_categories c ON c.CategoryID = p.CategoryID
+LEFT JOIN stg_suppliers  s ON s.SupplierID = p.SupplierID
+```
+3.3. PutDatabaseRecord destino `dim_producto`.
 3.4. Validar:
 ```sql
 SELECT COUNT(*) FROM dim_producto;     -- 77
@@ -125,17 +163,17 @@ SELECT product_name, category_name, supplier_name FROM dim_producto LIMIT 5;
 ## Paso 4 — Cargar `dim_empleado` (con concatenación)
 
 4.1. Trigger + TRUNCATE.
-4.2. ExecuteSQL:
-   ```sql
-   SELECT
-     EmployeeID                          AS employee_id,
-     CONCAT(FirstName, ' ', LastName)    AS nombre_completo,
-     Title                               AS titulo,
-     Country                             AS pais,
-     HireDate                            AS fecha_contratacion
-   FROM stg_employees
-   ```
-4.3. Avro→JSON + PutDatabaseRecord (`dim_empleado`).
+4.2. ExecuteSQLRecord:
+```sql
+SELECT
+  EmployeeID                          AS employee_id,
+  CONCAT(FirstName, ' ', LastName)    AS nombre_completo,
+  Title                               AS titulo,
+  Country                             AS pais,
+  HireDate                            AS fecha_contratacion
+FROM stg_employees
+```
+4.3. PutDatabaseRecord → `dim_empleado`.
 4.4. Validar:
 ```sql
 SELECT COUNT(*) FROM dim_empleado;   -- 9
@@ -147,11 +185,11 @@ SELECT nombre_completo FROM dim_empleado;
 ## Paso 5 — Cargar `dim_transportista`
 
 5.1. Trigger + TRUNCATE.
-5.2. ExecuteSQL:
-   ```sql
-   SELECT ShipperID AS shipper_id, CompanyName AS company_name FROM stg_shippers
-   ```
-5.3. Avro→JSON + PutDatabaseRecord (`dim_transportista`).
+5.2. ExecuteSQLRecord:
+```sql
+SELECT ShipperID AS shipper_id, CompanyName AS company_name FROM stg_shippers
+```
+5.3. PutDatabaseRecord → `dim_transportista`.
 5.4. Validar: 3 filas.
 
 ---
@@ -161,15 +199,15 @@ SELECT nombre_completo FROM dim_empleado;
 La geografía se deriva de los campos `Ship*` de Orders.
 
 6.1. Trigger + TRUNCATE.
-6.2. ExecuteSQL (pool `MySQL-Staging`):
-   ```sql
-   SELECT DISTINCT
-     COALESCE(ShipCity, 'No especificado')    AS ciudad,
-     COALESCE(ShipRegion, 'No especificado')  AS region,
-     COALESCE(ShipCountry, 'No especificado') AS pais
-   FROM stg_orders
-   ```
-6.3. Avro→JSON + PutDatabaseRecord (`dim_geografia`).
+6.2. ExecuteSQLRecord (pool `MySQL-Staging`):
+```sql
+SELECT DISTINCT
+  COALESCE(ShipCity,    'No especificado') AS ciudad,
+  COALESCE(ShipRegion,  'No especificado') AS region,
+  COALESCE(ShipCountry, 'No especificado') AS pais
+FROM stg_orders
+```
+6.3. PutDatabaseRecord → `dim_geografia`.
 6.4. Validar:
 ```sql
 SELECT COUNT(*) FROM dim_geografia;   -- típicamente 70-80 combinaciones únicas
@@ -181,14 +219,14 @@ SELECT * FROM dim_geografia ORDER BY pais, ciudad LIMIT 10;
 ## Paso 7 — Cargar `product_costos`
 
 7.1. Trigger + TRUNCATE.
-7.2. ExecuteSQL (pool `MySQL-Staging`):
-   ```sql
-   SELECT
-     ProductID                  AS product_id,
-     ROUND(UnitPrice * 0.60, 2) AS costo_unitario
-   FROM stg_products
-   ```
-7.3. Avro→JSON + PutDatabaseRecord (`product_costos`).
+7.2. ExecuteSQLRecord (pool `MySQL-Staging`):
+```sql
+SELECT
+  ProductID                  AS product_id,
+  ROUND(UnitPrice * 0.60, 2) AS costo_unitario
+FROM stg_products
+```
+7.3. PutDatabaseRecord → `product_costos`.
 7.4. Validar: 77 filas.
 
 ---
@@ -198,43 +236,37 @@ SELECT * FROM dim_geografia ORDER BY pais, ciudad LIMIT 10;
 Aquí materializamos el join Order Details ⋈ Orders con todas las claves de negocio.
 
 8.1. Trigger + TRUNCATE de `fact_landing`.
-8.2. ExecuteSQL (pool `MySQL-Staging`):
-   ```sql
-   SELECT
-     od.OrderID        AS order_id,
-     od.ProductID      AS product_id,
-     o.CustomerID      AS customer_id,
-     o.EmployeeID      AS employee_id,
-     o.ShipVia         AS shipper_id,
-     COALESCE(o.ShipCity,    'No especificado') AS ship_city,
-     COALESCE(o.ShipRegion,  'No especificado') AS ship_region,
-     COALESCE(o.ShipCountry, 'No especificado') AS ship_country,
-     DATE(o.OrderDate)   AS order_date,
-     DATE(o.ShippedDate) AS shipped_date,
-     od.Quantity        AS cantidad,
-     od.UnitPrice       AS precio_unitario,
-     od.Discount        AS descuento
-   FROM stg_order_details od
-   INNER JOIN stg_orders o ON o.OrderID = od.OrderID
-   ```
-8.3. Avro→JSON + PutDatabaseRecord (`fact_landing`).
+8.2. ExecuteSQLRecord (pool `MySQL-Staging`):
+```sql
+SELECT
+  od.OrderID        AS order_id,
+  od.ProductID      AS product_id,
+  o.CustomerID      AS customer_id,
+  o.EmployeeID      AS employee_id,
+  o.ShipVia         AS shipper_id,
+  COALESCE(o.ShipCity,    'No especificado') AS ship_city,
+  COALESCE(o.ShipRegion,  'No especificado') AS ship_region,
+  COALESCE(o.ShipCountry, 'No especificado') AS ship_country,
+  DATE(o.OrderDate)   AS order_date,
+  DATE(o.ShippedDate) AS shipped_date,
+  od.Quantity        AS cantidad,
+  od.UnitPrice       AS precio_unitario,
+  od.Discount        AS descuento
+FROM stg_order_details od
+INNER JOIN stg_orders o ON o.OrderID = od.OrderID
+```
+8.3. PutDatabaseRecord → `fact_landing`.
 8.4. Validar: **2155** filas.
 
 ---
 
-## Paso 9 — Generar `dim_metas` (cálculo dentro del DW)
+## Paso 9 — Resolución de SK y carga de `fact_ventas` + `dim_metas`
 
-Como `dim_metas` depende del histórico de ventas, la generamos DESPUÉS de cargar fact_ventas. Mejor: la generamos dentro del script grande del paso 10. Por ahora déjala vacía.
+Este es el corazón de las transformaciones. Se ejecuta como SQL set-based dentro del DW (no record-oriented porque es lógica de negocio en una sola transacción).
 
----
+9.1. **GenerateFlowFile** → Name `Trigger fact_ventas` → File Size `0B` → Run Schedule `999 days`.
 
-## Paso 10 — Resolución de SK y carga de `fact_ventas` (PutSQL grande)
-
-Este es el corazón de las transformaciones. Se ejecuta como SQL set-based dentro del DW.
-
-10.1. Crea un procesador **GenerateFlowFile** → Name `Trigger fact_ventas` → File Size `0B` → Run Schedule `999 days`.
-
-10.2. **PutSQL** (pool `MySQL-DW`, recuerda que tiene `allowMultiQueries=true`) → SQL Statement (todo este bloque en una sola property):
+9.2. **PutSQL** (pool `MySQL-DW`, con `allowMultiQueries=true` desde Fase 3) → SQL Statement:
 
 ```sql
 -- 1) Limpiar hecho y metas
@@ -276,29 +308,13 @@ JOIN dim_geografia     dg ON dg.ciudad   = fl.ship_city
                          AND dg.pais     = fl.ship_country
 JOIN product_costos    pc ON pc.product_id   = fl.product_id;
 
--- 3) Generar dim_metas = promedio histórico mensual + 10% por empleado
-INSERT INTO dim_metas (empleado_sk, anio, mes, meta_mensual)
-SELECT
-    fv.empleado_sk,
-    dt.anio,
-    dt.mes,
-    ROUND(AVG(SUM(fv.venta_neta)) OVER (PARTITION BY fv.empleado_sk) * 1.10, 2)
-FROM fact_ventas fv
-JOIN dim_tiempo dt ON dt.tiempo_sk = fv.tiempo_sk
-GROUP BY fv.empleado_sk, dt.anio, dt.mes;
-```
-
-> **Sobre la query de dim_metas:** MySQL no permite `AVG(SUM(...)) OVER (...)` directamente. Si te da error, reemplaza el paso 3 por una versión en 2 pasos:
-
-```sql
--- 3a) Tabla temporal con totales mensuales por empleado
+-- 3) Generar dim_metas en 2 pasos (MySQL no permite AVG(SUM()) OVER directo)
 CREATE TEMPORARY TABLE tmp_ventas_mes AS
 SELECT fv.empleado_sk, dt.anio, dt.mes, SUM(fv.venta_neta) AS venta_mes
 FROM fact_ventas fv
 JOIN dim_tiempo dt ON dt.tiempo_sk = fv.tiempo_sk
 GROUP BY fv.empleado_sk, dt.anio, dt.mes;
 
--- 3b) Promedio por empleado * 1.10
 INSERT INTO dim_metas (empleado_sk, anio, mes, meta_mensual)
 SELECT t.empleado_sk, t.anio, t.mes,
        ROUND(prom.prom_emp * 1.10, 2)
@@ -311,32 +327,32 @@ JOIN (
 DROP TEMPORARY TABLE tmp_ventas_mes;
 ```
 
-10.3. Name: `LOAD fact_ventas + dim_metas`. Auto-terminate: success, failure, retry.
+9.3. Name: `LOAD fact_ventas + dim_metas`. Auto-terminate: success, failure, retry.
 
 ---
 
-## Paso 11 — Validar la bodega completa
+## Paso 10 — Validar la bodega completa
 
-11.1. En el DW:
+10.1. En el DW:
 ```sql
 -- Conteos esperados
-SELECT 'fact_ventas' AS tbl, COUNT(*) FROM fact_ventas   -- 2155
-UNION ALL SELECT 'dim_cliente',  COUNT(*) FROM dim_cliente   -- 91
-UNION ALL SELECT 'dim_producto', COUNT(*) FROM dim_producto  -- 77
-UNION ALL SELECT 'dim_empleado', COUNT(*) FROM dim_empleado  -- 9
+SELECT 'fact_ventas' AS tbl, COUNT(*) FROM fact_ventas        -- 2155
+UNION ALL SELECT 'dim_cliente',  COUNT(*) FROM dim_cliente    -- 91
+UNION ALL SELECT 'dim_producto', COUNT(*) FROM dim_producto   -- 77
+UNION ALL SELECT 'dim_empleado', COUNT(*) FROM dim_empleado   -- 9
 UNION ALL SELECT 'dim_transportista', COUNT(*) FROM dim_transportista -- 3
 UNION ALL SELECT 'dim_geografia',   COUNT(*) FROM dim_geografia
 UNION ALL SELECT 'dim_metas',       COUNT(*) FROM dim_metas;
 
--- Suma total de ventas (cross-check vs fuente)
+-- Cross-check: suma total de ventas
 SELECT ROUND(SUM(venta_neta), 2) AS total_neto FROM fact_ventas;
--- Comparar con SQL Server:
+-- Comparar contra SQL Server:
 -- SELECT ROUND(SUM(od.UnitPrice * od.Quantity * (1 - od.Discount)), 2)
 -- FROM [Order Details] od;
 ```
 Los dos totales deben coincidir (centavo arriba/abajo por redondeos).
 
-11.2. Una consulta de prueba para cada pregunta de negocio:
+10.2. Una consulta de prueba para algunas preguntas de negocio:
 ```sql
 -- Pregunta 1: ventas por año
 SELECT t.anio, ROUND(SUM(f.venta_neta), 2) AS total
@@ -353,27 +369,24 @@ SELECT p.product_name, ROUND(SUM(f.margen), 2) AS margen_total
 FROM fact_ventas f JOIN dim_producto p ON p.producto_sk = f.producto_sk
 GROUP BY p.product_name ORDER BY margen_total DESC LIMIT 5;
 ```
-11.3. **CAPTURA:** los conteos + el total cross-check + las 3 consultas.
+10.3. **CAPTURA:** los conteos + el total cross-check + las 3 consultas.
 
 ---
 
-## Paso 12 — Orquestación: corrida End-to-End
+## Paso 11 — Orquestación: corrida End-to-End
 
-12.1. Crea un **GenerateFlowFile maestro** `Trigger Pipeline 2 Completo` → File Size `0B`.
-12.2. Conéctalo a TODOS los `Trigger dim_*`, `Trigger fact_landing`, `Trigger product_costos`. Para esto, usa un procesador **DuplicateFlowFile** o crea conexiones múltiples desde el GenerateFlowFile.
-12.3. Tras todos los TRUNCATE/LOAD de dimensiones y landing, dispara el `Trigger fact_ventas`. Para sincronizar, usa el procesador **Wait/Notify** o simplemente confía en el orden de Start (las dimensiones cargan rápido).
-12.4. **Simplificación pragmática:** en lugar de Wait/Notify, ejecuta manualmente en este orden cada `Trigger X` (Right Click → Run Once):
-   1. dim_cliente, dim_producto, dim_empleado, dim_transportista, dim_geografia, product_costos (en paralelo, no importa el orden entre sí)
-   2. fact_landing
-   3. fact_ventas (y dim_metas)
+11.1. **Simplificación pragmática:** en lugar de coordinar con Wait/Notify, dispara manualmente cada trigger en este orden:
+   1. `Trigger dim_cliente`, `Trigger dim_producto`, `Trigger dim_empleado`, `Trigger dim_transportista`, `Trigger dim_geografia`, `Trigger product_costos` (orden libre entre sí — todos cargan a tablas distintas)
+   2. `Trigger fact_landing` (una vez las dimensiones estén)
+   3. `Trigger fact_ventas` (que también genera `dim_metas`)
 
-> Esto es suficiente para la sustentación; la orquestación con Wait/Notify es opcional.
+11.2. Si quieres automatizarlo, NiFi 2.x permite encadenar con **Wait + Notify** o usando un único `GenerateFlowFile` maestro que se conecte a todos los triggers con `DuplicateFlowFile`. Para esta sustentación, disparar manualmente es suficiente.
 
 ---
 
-## Paso 13 — Exportar Pipeline 2
+## Paso 12 — Exportar Pipeline 2
 
-13.1. Right Click sobre el process group → Download Flow Definition → `nifi-templates\Pipeline_2.json`.
+12.1. En el lienzo raíz, clic derecho sobre el Process Group `Pipeline 2 - Staging a DW` → **Download flow definition** → guarda como `nifi-templates\Pipeline_2.json`.
 
 ---
 
@@ -384,9 +397,17 @@ GROUP BY p.product_name ORDER BY margen_total DESC LIMIT 5;
 - [ ] `fact_landing` tiene 2155 filas
 - [ ] `fact_ventas` tiene 2155 filas
 - [ ] `dim_metas` tiene N filas (~ 9 empleados × meses con ventas)
-- [ ] Sumatoria de venta_neta cuadra con la fuente
-- [ ] Las 10 preguntas de negocio retornan datos coherentes con un SELECT exploratorio
-- [ ] Pipeline 2 exportado
+- [ ] Sumatoria de `venta_neta` cuadra con la fuente
+- [ ] Las consultas de prueba retornan datos coherentes
+- [ ] Pipeline 2 exportado a `nifi-templates\Pipeline_2.json`
 - [ ] Capturas en `capturas\04\` (mínimo 8)
+
+## Resumen del cambio respecto a NiFi 1.x
+
+| Antes (NiFi 1.x) | Ahora (NiFi 2.x) |
+|---|---|
+| ExecuteSQL → ConvertAvroToJSON → PutDatabaseRecord | **ExecuteSQLRecord** (con `JsonWriter`) → PutDatabaseRecord |
+| 5 procesadores por dimensión | **4 procesadores** por dimensión |
+| Templates `.xml` (legacy) | Flow Definitions `.json` |
 
 **"Fase 4 lista"** → pasamos a la Fase 5 (instalar SSAS Tabular).

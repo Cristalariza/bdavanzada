@@ -6,51 +6,52 @@
 
 ---
 
-## Paso 1 — Crear el `docker-compose.yml` inicial
+## Paso 1 — Revisar el `docker-compose.yml`
 
-1.1. Abre el archivo `C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD\docker-compose.yml` en un editor de texto (VS Code, Notepad++, o el que prefieras).
-1.2. Escribe **exactamente** este contenido (todavía solo SQL Server; en la Fase 2 agregaremos los MySQL):
+El archivo `docker-compose.yml` **ya está en el repo** y contiene los 4 servicios del proyecto (SQL Server + 2 MySQL + NiFi). En esta fase solo nos interesa el bloque de `source_sqlserver`.
+
+1.1. Abre `<RUTA_PROYECTO>\docker-compose.yml` y localiza el servicio `source_sqlserver`:
 
 ```yaml
-services:
-  source_sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: source_sqlserver
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "Northwind2026!"
-      MSSQL_PID: "Developer"
-    ports:
-      - "1433:1433"
-    volumes:
-      - sqlserver_data:/var/opt/mssql
-    restart: unless-stopped
-
-volumes:
-  sqlserver_data:
+source_sqlserver:
+  image: mcr.microsoft.com/mssql/server:2022-latest
+  container_name: source_sqlserver
+  hostname: source_sqlserver
+  environment:
+    ACCEPT_EULA: "Y"
+    MSSQL_SA_PASSWORD: "Northwind2026!"
+    MSSQL_PID: "Developer"
+  ports:
+    - "1433:1433"
+  volumes:
+    - sqlserver_data:/var/opt/mssql
+  networks:
+    - bi_network
+  restart: unless-stopped
 ```
 
-1.3. Guarda el archivo. Verifica que la **indentación** sea con espacios (2 espacios), no tabs. YAML es estricto con esto.
-
-> **¿Por qué esta configuración?**
-> - `image:` la imagen oficial Microsoft, versión 2022 Linux.
-> - `ACCEPT_EULA`: obligatorio, sino el contenedor no arranca.
-> - `MSSQL_SA_PASSWORD`: tu contraseña del usuario `sa`. Debe cumplir la política de SQL Server (8+ caracteres, mayúscula, minúscula, número, símbolo). `Northwind2026!` cumple.
-> - `MSSQL_PID: "Developer"`: edición gratuita para desarrollo, todas las features de Enterprise.
-> - `volumes:` volumen **nombrado** `sqlserver_data` para que los datos sobrevivan a `docker compose down`.
-> - `restart: unless-stopped`: se levanta solo al reiniciar Docker, salvo que tú lo apagues.
+1.2. Puntos clave a entender:
+   - `image:` la imagen oficial Microsoft, versión 2022 Linux.
+   - `ACCEPT_EULA`: obligatorio.
+   - `MSSQL_SA_PASSWORD`: contraseña del `sa`. Cumple la política (8+ caracteres, mayúscula, minúscula, número, símbolo).
+   - `MSSQL_PID: "Developer"`: edición gratuita con todas las features de Enterprise.
+   - `hostname` + `networks: bi_network`: lo hace visible para NiFi como `source_sqlserver:1433`.
+   - Volumen nombrado `sqlserver_data` → los datos sobreviven a `docker compose down`.
+   - `restart: unless-stopped`: se levanta solo al reiniciar Docker.
 
 ---
 
-## Paso 2 — Levantar el contenedor
+## Paso 2 — Levantar solo el contenedor de SQL Server
+
+En esta fase solo arrancamos `source_sqlserver`. Los demás los iremos levantando en sus respectivas fases.
 
 2.1. Abre PowerShell y navega a la carpeta del proyecto:
 ```powershell
 cd C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD
 ```
-2.2. Ejecuta:
+2.2. Levanta SOLO el servicio que necesitas:
 ```powershell
-docker compose up -d
+docker compose up -d source_sqlserver
 ```
 2.3. Espera 30-60 segundos. La primera vez descarga la imagen (~1.5 GB).
 2.4. Verifica que está corriendo:
@@ -60,7 +61,7 @@ docker ps
 Debes ver una línea con `source_sqlserver` en estado `Up X seconds`.
 2.5. Mira los logs por si hay errores:
 ```powershell
-docker logs source_sqlserver
+docker logs source_sqlserver --tail 20
 ```
 La última línea útil debe ser algo como `SQL Server is now ready for client connections`.
 2.6. **CAPTURA:** la salida de `docker ps`.

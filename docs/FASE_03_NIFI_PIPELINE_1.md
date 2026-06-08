@@ -1,122 +1,111 @@
-# Fase 3 — Apache NiFi 2.x + Pipeline 1 (Fuente → Staging)
+# Fase 3 — Apache NiFi 2.x (en Docker) + Pipeline 1 (Fuente → Staging)
 
-**Objetivo:** arrancar NiFi 2.x, configurar los pools de conexión y construir el **Pipeline 1**, que extrae datos crudos de SQL Server (Northwind) y los carga 1:1 al Staging MySQL. Sin transformar nada.
+**Objetivo:** acceder al NiFi que ya corre en el contenedor `nifi`, configurar los pools de conexión y construir el **Pipeline 1**, que extrae datos crudos de SQL Server (Northwind) y los carga 1:1 al Staging MySQL.
 **Tiempo estimado:** 3 horas (puede dividirse en 2 sesiones).
-**Prerrequisitos:** Fases 0, 1, 2 completadas.
+**Prerrequisitos:** Fases 0, 1, 2 completadas. Los 4 contenedores deben estar corriendo (`docker ps` muestra `source_sqlserver`, `staging_mysql`, `dw_mysql`, `nifi`).
 
 ---
 
-## Paso 1 — Configurar NiFi para acceso sin SSL (modo desarrollo)
+## Paso 1 — Colocar los drivers JDBC para NiFi
 
-NiFi 2.x por defecto usa HTTPS con certificado autofirmado y un usuario aleatorio. Para este proyecto académico simplificamos a HTTP plano.
+NiFi necesita los drivers de SQL Server y MySQL para conectarse. El contenedor los lee desde `/opt/nifi/nifi-current/extra-jars/`, que está mapeado a la carpeta local `nifi\drivers\`.
 
-1.1. Detén NiFi si lo iniciaste antes: cierra la terminal donde corre.
-1.2. Abre el archivo `C:\nifi\nifi-2.x.x\conf\nifi.properties` con Notepad++ o VS Code (NO con Notepad simple — daña los saltos de línea).
-1.3. Busca y modifica estas líneas (usa Ctrl+F):
-
-| Buscar | Cambiar a |
-|---|---|
-| `nifi.web.https.port=8443` | `nifi.web.https.port=` (deja vacío) |
-| `nifi.web.https.host=127.0.0.1` | `nifi.web.https.host=` (deja vacío) |
-| `nifi.web.http.port=` (vacío) | `nifi.web.http.port=8080` |
-| `nifi.web.http.host=` (vacío) | `nifi.web.http.host=127.0.0.1` |
-| `nifi.security.user.login.identity.provider=single-user-provider` | `nifi.security.user.login.identity.provider=` (vacío) |
-| `nifi.security.allow.anonymous.authentication=false` | `nifi.security.allow.anonymous.authentication=true` |
-
-1.4. Guarda el archivo.
-
-> **¿Por qué?** En desarrollo local sin secretos sensibles, HTTPS + auth añade fricción sin valor. Para producción real, esto NO se hace.
+1.1. Verifica que existan los dos `.jar` en `C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD\nifi\drivers\`:
+   - `mssql-jdbc-X.X.X.jre11.jar`
+   - `mysql-connector-j-X.X.X.jar`
+1.2. Si no los tienes, descárgalos:
+   - **SQL Server JDBC:** https://learn.microsoft.com/en-us/sql/connect/jdbc/download-microsoft-jdbc-driver-for-sql-server → ZIP → extrae solo el `.jre11.jar` o `.jre17.jar`.
+   - **MySQL JDBC:** https://dev.mysql.com/downloads/connector/j/ → "Platform Independent" ZIP → extrae el `.jar`.
+1.3. Cópialos a la carpeta `nifi\drivers\`.
+1.4. **Reinicia el contenedor NiFi** para que detecte los nuevos archivos:
+   ```powershell
+   docker compose restart nifi
+   ```
+1.5. Espera 2-3 minutos a que NiFi vuelva a estar listo.
+1.6. **CAPTURA:** explorador mostrando los 2 `.jar` en `nifi\drivers\`.
 
 ---
 
-## Paso 2 — Arrancar NiFi
+## Paso 2 — Acceder a la UI de NiFi
 
-2.1. Abre PowerShell y ejecuta:
-```powershell
-cd C:\nifi\nifi-2.x.x\bin
-.\run-nifi.bat
-```
-2.2. NiFi tarda **2-3 minutos** en arrancar. Verás muchos logs. Espera hasta ver una línea similar a:
-```
-NiFi has started. The UI is available at the following URLs: http://127.0.0.1:8080/nifi
-```
-2.3. **No cierres esta terminal**: si la cierras, NiFi se apaga. Más adelante puedes correrlo como servicio Windows.
-2.4. Abre el navegador en `http://127.0.0.1:8080/nifi`. Debe aparecer el lienzo de NiFi vacío.
-2.5. **CAPTURA:** lienzo de NiFi cargado.
-
----
-
-## Paso 3 — Cargar los drivers JDBC en NiFi
-
-3.1. En PowerShell (otra ventana, NiFi sigue corriendo):
-```powershell
-copy C:\nifi\drivers\mssql-jdbc-*.jar C:\nifi\nifi-2.x.x\lib\
-copy C:\nifi\drivers\mysql-connector-j-*.jar C:\nifi\nifi-2.x.x\lib\
-```
-3.2. **Reinicia NiFi** para que cargue los drivers nuevos:
-   - En la terminal donde corre NiFi, presiona Ctrl+C y espera a que termine.
-   - Vuelve a ejecutar `.\run-nifi.bat`.
-   - Espera de nuevo el mensaje "NiFi has started".
+2.1. Verifica que el contenedor esté corriendo:
+   ```powershell
+   docker ps --filter "name=nifi"
+   ```
+   Debe mostrar `Up X minutes`.
+2.2. Mira los logs para confirmar que arrancó bien:
+   ```powershell
+   docker logs nifi --tail 30
+   ```
+   Debe aparecer una línea similar a `NiFi has started. The UI is available at the following URLs`.
+2.3. Abre el navegador en **`https://localhost:8443/nifi`** (es HTTPS, no HTTP).
+2.4. El navegador advertirá certificado no confiable (porque es autofirmado). Clic en **"Avanzado" → "Continuar a localhost (no seguro)"**.
+2.5. Pantalla de login. Usuario y contraseña:
+   - Usuario: `admin`
+   - Contraseña: `NifiAdmin2026!`
+2.6. Debe aparecer el lienzo vacío de NiFi.
+2.7. **CAPTURA:** lienzo de NiFi cargado tras login.
 
 ---
 
-## Paso 4 — Crear los 3 Controller Services (pools de conexión)
+## Paso 3 — Verificar que NiFi puede ver los drivers
 
-NiFi separa la configuración de la conexión a base de datos del procesador que la usa. Estos pools son **Controller Services**.
+3.1. Clic en el menú **☰ (arriba a la derecha) → Controller Settings → Controller Services**. (Lista vacía por ahora, normal.)
+3.2. Clic en el botón **+** → busca `DBCPConnectionPool` → Add. (Solo es para confirmar que el tipo existe; lo configuraremos en el paso 4.)
+3.3. Si quieres asegurarte que los `.jar` están dentro del contenedor:
+   ```powershell
+   docker exec nifi ls -la /opt/nifi/nifi-current/extra-jars/
+   ```
+   Debe listar los 2 `.jar`.
+3.4. **CAPTURA:** salida del `docker exec` mostrando los `.jar`.
 
-4.1. En la UI de NiFi, clic en el ícono de **hamburguesa (☰) arriba a la derecha → Controller Settings**.
-4.2. Ve a la pestaña **Controller Services**.
-4.3. Clic en el **+** para agregar un nuevo servicio.
-4.4. Busca **DBCPConnectionPool** → Add.
+---
 
-### 4.4.A — Pool para SQL Server (fuente)
+## Paso 4 — Crear los 3 Controller Services
 
-Doble clic sobre el servicio creado → Properties:
+> **Importante:** como NiFi corre en el contenedor `nifi` y se conecta a los otros contenedores por la red `bi_network`, **los URL JDBC usan los nombres de servicio, NO `localhost`**. Y para MySQL usan el **puerto interno 3306** (no 3307), porque los contenedores se ven entre sí dentro de la red, no por los puertos mapeados al host.
+
+### 4.A — Pool para SQL Server (fuente)
+
+4.A.1. En **Controller Settings → Controller Services → +** → `DBCPConnectionPool` → Add.
+4.A.2. Doble clic sobre el servicio → pestaña **Properties**:
 
 | Property | Value |
 |---|---|
-| Database Connection URL | `jdbc:sqlserver://host.docker.internal:1433;databaseName=Northwind;encrypt=false;trustServerCertificate=true` |
+| Database Connection URL | `jdbc:sqlserver://source_sqlserver:1433;databaseName=Northwind;encrypt=false;trustServerCertificate=true` |
 | Database Driver Class Name | `com.microsoft.sqlserver.jdbc.SQLServerDriver` |
-| Database Driver Location(s) | `/C:/nifi/nifi-2.x.x/lib/mssql-jdbc-XX.X.X.jre11.jar` (ajusta nombre real del jar) |
+| Database Driver Location(s) | `/opt/nifi/nifi-current/extra-jars/mssql-jdbc-XX.X.X.jre11.jar` (ajusta el nombre real del jar) |
 | Database User | `nifi_reader` |
 | Password | `NifiReader2026!` |
 | Max Wait Time | `30 seconds` |
 | Max Total Connections | `8` |
 
-> **Importante:** dentro de NiFi corriendo en Windows nativo, accedes a `localhost:1433`. PERO si más adelante decides correr NiFi también en contenedor, debes usar el nombre del servicio (`source_sqlserver`). Para esta guía NiFi corre nativo, usa `localhost`.
-> Corrige: el URL correcto desde NiFi nativo es `jdbc:sqlserver://localhost:1433;...`. Solo usa `host.docker.internal` si NiFi está en contenedor.
+4.A.3. Pestaña **Settings** → Name: `SQLServer-Northwind-Reader`.
+4.A.4. Apply → habilita el servicio con el rayito ⚡ → State: **Enabled**.
 
-Cambia el URL a:
-```
-jdbc:sqlserver://localhost:1433;databaseName=Northwind;encrypt=false;trustServerCertificate=true
-```
+### 4.B — Pool para MySQL Staging
 
-Pestaña **Settings** → Name: `SQLServer-Northwind-Reader`.
-Apply → Habilita el servicio con el rayito ⚡ → State: **Enabled**.
-
-### 4.4.B — Pool para MySQL Staging
-
-Repite el proceso. Otro DBCPConnectionPool con:
+4.B.1. Otro DBCPConnectionPool con:
 
 | Property | Value |
 |---|---|
-| Database Connection URL | `jdbc:mysql://localhost:3307/staging_northwind?useSSL=false&serverTimezone=UTC` |
+| Database Connection URL | `jdbc:mysql://staging_mysql:3306/staging_northwind?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true` |
 | Database Driver Class Name | `com.mysql.cj.jdbc.Driver` |
-| Database Driver Location(s) | `/C:/nifi/nifi-2.x.x/lib/mysql-connector-j-X.X.X.jar` |
+| Database Driver Location(s) | `/opt/nifi/nifi-current/extra-jars/mysql-connector-j-X.X.X.jar` |
 | Database User | `etl_user` |
 | Password | `EtlUser2026!` |
 
 Name: `MySQL-Staging`. Habilítalo.
 
-### 4.4.C — Pool para MySQL DW
+### 4.C — Pool para MySQL DW
 
-Otro más con:
+4.C.1. Otro más con:
 
 | Property | Value |
 |---|---|
-| Database Connection URL | `jdbc:mysql://localhost:3306/dw_northwind?useSSL=false&serverTimezone=UTC&allowMultiQueries=true` |
+| Database Connection URL | `jdbc:mysql://dw_mysql:3306/dw_northwind?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&allowMultiQueries=true` |
 | Database Driver Class Name | `com.mysql.cj.jdbc.Driver` |
-| Database Driver Location(s) | `/C:/nifi/nifi-2.x.x/lib/mysql-connector-j-X.X.X.jar` |
+| Database Driver Location(s) | `/opt/nifi/nifi-current/extra-jars/mysql-connector-j-X.X.X.jar` |
 | Database User | `etl_user` |
 | Password | `EtlUser2026!` |
 
@@ -124,7 +113,9 @@ Otro más con:
 
 Name: `MySQL-DW`. Habilítalo.
 
-4.5. **CAPTURA:** los 3 Controller Services en estado **Enabled**.
+4.D. **CAPTURA:** los 3 Controller Services en estado **Enabled**.
+
+> **Si alguno NO se habilita** y da error "Driver class not found": revisa que el `.jar` esté en `nifi\drivers\` y que la ruta del campo "Driver Location" coincida con el nombre real del archivo. Reinicia el contenedor (`docker compose restart nifi`) si dudas.
 
 ---
 
@@ -184,7 +175,7 @@ Vamos a construir el subflujo para `Categories` primero. Luego lo replicas para 
 | Unmatched Field Behavior | `Ignore Unmatched Fields` |
 | Unmatched Column Behavior | `Ignore Unmatched Columns` |
 
-> **`Translate Field Names = true`** convierte `CategoryID` → `categoryid` para que matchee `CategoryID` de MySQL (insensible a mayúsculas). Por eso podemos copiar columnas con PascalCase desde SQL Server a MySQL.
+> **`Translate Field Names = true`** convierte `CategoryID` → `categoryid` para que matchee con la columna `CategoryID` de MySQL (insensible a mayúsculas).
 
 6.C.4. Settings → Name: `LOAD stg_categories`. Auto-terminate: `success`, `failure`, `retry`.
 
@@ -266,7 +257,7 @@ Estas son tablas transaccionales. Aquí sí carga **incremental por watermark** 
 
 ### 8.A — Orders
 
-8.A.1. Arrastra un procesador **QueryDatabaseTable** (este sí maneja estado de incremental por sí mismo).
+8.A.1. Arrastra un procesador **QueryDatabaseTable** (este maneja estado de incremental por sí mismo).
 8.A.2. Properties:
 
 | Property | Value |
@@ -281,7 +272,7 @@ Estas son tablas transaccionales. Aquí sí carga **incremental por watermark** 
 8.A.3. Settings → Name: `EXTRACT Orders (incremental)`. Auto-terminate: nada (success va al siguiente procesador).
 8.A.4. Conéctalo a un nuevo `Avro→JSON` + `PutDatabaseRecord` (con destino `stg_orders` en `MySQL-Staging`). MISMA configuración que las dimensiones, sin TRUNCATE — porque es incremental.
 
-> **Importante:** QueryDatabaseTable guarda el `MAX(OrderID)` en el estado del procesador. La primera corrida trae todo (10248..11077); las siguientes solo lo nuevo.
+> **Importante:** QueryDatabaseTable guarda el `MAX(OrderID)` en el estado del procesador. La primera corrida trae todo (10248..11077); las siguientes solo lo nuevo. Para reiniciar el estado: clic derecho sobre el procesador → View State → Clear State.
 
 ### 8.B — Order Details
 
@@ -303,7 +294,7 @@ SELECT COUNT(*) FROM stg_order_details; -- esperado: 2155
 
 ## Paso 9 — Probar la incrementalidad
 
-9.1. En SQL Server, inserta un pedido nuevo:
+9.1. En SQL Server (DBeaver, base `Northwind`), inserta un pedido nuevo:
 ```sql
 USE Northwind;
 INSERT INTO Orders (CustomerID, EmployeeID, OrderDate)
@@ -322,14 +313,17 @@ SELECT @new_id AS nuevo_pedido;
 ## Paso 10 — Exportar el template
 
 10.1. En NiFi, selecciona TODOS los procesadores del Pipeline 1 → clic derecho → Download Flow Definition → guarda como `nifi-templates\Pipeline_1.json` en la carpeta del proyecto.
-10.2. **CAPTURA:** archivo guardado.
+10.2. Como NiFi corre en contenedor y los volúmenes son persistentes, los flows ya sobreviven a reinicios. El JSON exportado es solo para versionado/git.
+10.3. **CAPTURA:** archivo guardado.
 
 ---
 
 ## Checklist de cierre de la Fase 3
 
-- [ ] NiFi corre en `http://127.0.0.1:8080/nifi` sin auth
+- [ ] Drivers JDBC en `nifi\drivers\` y visibles dentro del contenedor
+- [ ] NiFi accesible en `https://localhost:8443/nifi` con `admin / NifiAdmin2026!`
 - [ ] 3 Controller Services Enabled (`SQLServer-Northwind-Reader`, `MySQL-Staging`, `MySQL-DW`)
+- [ ] URLs JDBC usan nombres de servicio (`source_sqlserver`, `staging_mysql`, `dw_mysql`) y puerto **3306** interno
 - [ ] Pipeline 1 carga las 8 tablas con conteos correctos (91/830/2155/77/8/29/9/3)
 - [ ] Carga incremental probada (pedido manual aparece tras re-ejecutar)
 - [ ] Pipeline 1 exportado a `nifi-templates\Pipeline_1.json`

@@ -6,84 +6,70 @@
 
 ---
 
-## Paso 1 — Ampliar el `docker-compose.yml`
+## Paso 1 — Revisar los servicios MySQL en `docker-compose.yml`
 
-1.1. Abre `C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD\docker-compose.yml`.
-1.2. Reemplaza el contenido completo por este (mantiene SQL Server, agrega los dos MySQL):
+Los dos MySQL **ya están declarados** en el `docker-compose.yml` del repo. Revísalos para entender qué hacen antes de levantarlos:
 
 ```yaml
-services:
-  source_sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: source_sqlserver
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "Northwind2026!"
-      MSSQL_PID: "Developer"
-    ports:
-      - "1433:1433"
-    volumes:
-      - sqlserver_data:/var/opt/mssql
-    restart: unless-stopped
+staging_mysql:
+  image: mysql:8.0
+  container_name: staging_mysql
+  hostname: staging_mysql
+  environment:
+    MYSQL_ROOT_PASSWORD: "Northwind2026!"
+    MYSQL_DATABASE: "staging_northwind"
+    MYSQL_USER: "etl_user"
+    MYSQL_PASSWORD: "EtlUser2026!"
+  ports:
+    - "3307:3306"
+  volumes:
+    - staging_data:/var/lib/mysql
+    - ./sql/staging-init:/docker-entrypoint-initdb.d
+  networks:
+    - bi_network
 
-  staging_mysql:
-    image: mysql:8.0
-    container_name: staging_mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: "Northwind2026!"
-      MYSQL_DATABASE: "staging_northwind"
-      MYSQL_USER: "etl_user"
-      MYSQL_PASSWORD: "EtlUser2026!"
-    command: ["mysqld", "--default-authentication-plugin=mysql_native_password"]
-    ports:
-      - "3307:3306"
-    volumes:
-      - staging_data:/var/lib/mysql
-    restart: unless-stopped
-
-  dw_mysql:
-    image: mysql:8.0
-    container_name: dw_mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: "Northwind2026!"
-      MYSQL_DATABASE: "dw_northwind"
-      MYSQL_USER: "etl_user"
-      MYSQL_PASSWORD: "EtlUser2026!"
-    command: ["mysqld", "--default-authentication-plugin=mysql_native_password"]
-    ports:
-      - "3306:3306"
-    volumes:
-      - dw_data:/var/lib/mysql
-    restart: unless-stopped
-
-volumes:
-  sqlserver_data:
-  staging_data:
-  dw_data:
+dw_mysql:
+  image: mysql:8.0
+  container_name: dw_mysql
+  hostname: dw_mysql
+  environment:
+    MYSQL_DATABASE: "dw_northwind"
+    ... (similar)
+  ports:
+    - "3306:3306"
+  volumes:
+    - dw_data:/var/lib/mysql
+    - ./sql/dw-init:/docker-entrypoint-initdb.d
+  networks:
+    - bi_network
 ```
 
-1.3. Puntos clave:
-   - **Dos servicios MySQL distintos** (`staging_mysql` y `dw_mysql`) con dos volúmenes distintos. Son servidores independientes aunque corran en la misma máquina física.
-   - El puerto **interno** de MySQL es siempre 3306. El **mapeo externo** es lo que diferencia: 3307 para staging, 3306 para DW.
-   - `--default-authentication-plugin=mysql_native_password`: importante porque algunos clientes y NiFi tienen problemas con el plugin `caching_sha2_password` por defecto.
-   - `etl_user` se crea automáticamente con permisos sobre la base inicial — luego le ajustamos privilegios.
+1.1. Puntos clave:
+   - **Dos servicios MySQL distintos** (`staging_mysql` y `dw_mysql`) con volúmenes y bases distintas. Son **servidores independientes**.
+   - El puerto **interno** de MySQL es siempre 3306. El **mapeo externo** es lo que los diferencia desde Windows: **3307** para staging, **3306** para DW.
+   - Desde el contenedor `nifi`, sin embargo, los ves por nombre: `staging_mysql:3306` y `dw_mysql:3306` (puerto interno).
+   - `./sql/staging-init` y `./sql/dw-init` se mapean a `/docker-entrypoint-initdb.d/`. MySQL ejecuta automáticamente cualquier `.sql` ahí **la primera vez** que arranca con el volumen vacío.
 
-1.4. Guarda el archivo.
+## Paso 1.B — (Opcional) Pre-cargar DDL para auto-arranque
+
+Si pones tu DDL en `sql\staging-init\01_staging.sql` y `sql\dw-init\02_dw.sql` ANTES de arrancar los contenedores por primera vez, MySQL crea las tablas automáticamente. Si los pones después, tendrás que hacer `docker compose down -v staging_mysql dw_mysql` para recrear los volúmenes.
+
+Para esta guía vamos a crear las tablas **manualmente desde DBeaver** (Pasos 4 y 5), así controlas qué pasa y no dependes del auto-arranque.
 
 ---
 
-## Paso 2 — Levantar los nuevos contenedores
+## Paso 2 — Levantar los dos MySQL
 
 2.1. En PowerShell, en la carpeta del proyecto:
 ```powershell
-docker compose up -d
+docker compose up -d staging_mysql dw_mysql
 ```
-2.2. Esta vez descargará la imagen `mysql:8.0` (~600 MB).
+2.2. La primera vez descarga la imagen `mysql:8.0` (~600 MB).
 2.3. Espera ~60 segundos y ejecuta:
 ```powershell
 docker ps
 ```
-Debes ver **3 contenedores corriendo**: `source_sqlserver`, `staging_mysql`, `dw_mysql`.
+Debes ver **3 contenedores corriendo**: `source_sqlserver` (de Fase 1), `staging_mysql`, `dw_mysql`.
 2.4. Inspecciona los puertos:
 ```powershell
 docker port staging_mysql

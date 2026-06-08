@@ -72,105 +72,76 @@ La segunda línea debe imprimir "Hello from Docker!". Si falla, espera a que Doc
 
 ---
 
-## Paso 4 — Instalar Java 21 (necesario para NiFi 2.x)
+## Paso 4 — Descargar drivers JDBC para NiFi
 
-NiFi 2.x **requiere Java 21**. No funciona con Java 17 ni con Java 8.
+NiFi corre dentro de un contenedor Docker (lo levantaremos en la Fase 1) pero necesita los drivers JDBC para hablar con SQL Server y MySQL. Esos drivers se montan al contenedor desde la carpeta local `nifi\drivers\`.
 
-4.1. Ve a https://adoptium.net/temurin/releases/?version=21 y descarga **Temurin 21 LTS, Windows x64, Installer (.msi)**.
-4.2. Ejecuta el instalador. En la pantalla de "Custom Setup", expande "Set JAVA_HOME variable" y marca "Will be installed on local hard drive". Igual para "JAVA_HOME environment variable".
-4.3. Termina la instalación.
-4.4. Cierra y vuelve a abrir PowerShell. Ejecuta:
-```
-java -version
-echo $env:JAVA_HOME
-```
-Debe imprimir algo como `openjdk version "21.0.x"` y la ruta a Temurin.
-4.5. **CAPTURA:** ambas salidas.
+> **Ya NO necesitas:** instalar Java 21 ni descargar el binario de NiFi. Todo eso vive dentro del contenedor `nifi` declarado en `docker-compose.yml`.
+
+4.1. **SQL Server JDBC:** ve a https://learn.microsoft.com/en-us/sql/connect/jdbc/download-microsoft-jdbc-driver-for-sql-server y descarga el ZIP del driver más reciente. Extrae solamente el archivo `mssql-jdbc-X.X.X.jre11.jar` (o `jre17.jar`) a `<RUTA_PROYECTO>\nifi\drivers\`.
+4.2. **MySQL JDBC:** ve a https://dev.mysql.com/downloads/connector/j/ y descarga "Platform Independent" (ZIP). Extrae `mysql-connector-j-X.X.X.jar` a `<RUTA_PROYECTO>\nifi\drivers\`.
+4.3. Verifica que en `nifi\drivers\` haya 2 archivos `.jar`.
+4.4. **CAPTURA:** explorador mostrando los dos `.jar`.
 
 ---
 
-## Paso 5 — Descargar Apache NiFi 2.x
-
-5.1. Ve a https://nifi.apache.org/download.html.
-5.2. Descarga el ZIP del último **NiFi 2.x** (binario, no fuente). Nombre del archivo: algo como `nifi-2.x.x-bin.zip`.
-5.3. Descomprímelo en `C:\nifi\` (sin espacios en la ruta — importante). Debe quedar `C:\nifi\nifi-2.x.x\bin\run-nifi.bat`.
-5.4. **No lo arranques todavía**; lo haremos en la Fase 3.
-5.5. **CAPTURA:** carpeta `C:\nifi\nifi-2.x.x\` con su contenido.
-
----
-
-## Paso 6 — Descargar drivers JDBC
-
-NiFi necesita los drivers JDBC para hablar con SQL Server y MySQL.
-
-6.1. Crea la carpeta `C:\nifi\drivers\`.
-6.2. **SQL Server JDBC:** ve a https://learn.microsoft.com/en-us/sql/connect/jdbc/download-microsoft-jdbc-driver-for-sql-server y descarga el ZIP del driver más reciente. Extrae solamente el archivo `mssql-jdbc-X.X.X.jre11.jar` (o `jre17.jar`) a `C:\nifi\drivers\`.
-6.3. **MySQL JDBC:** ve a https://dev.mysql.com/downloads/connector/j/ y descarga "Platform Independent" (ZIP). Extrae `mysql-connector-j-X.X.X.jar` a `C:\nifi\drivers\`.
-6.4. Verifica que en `C:\nifi\drivers\` haya 2 archivos `.jar`.
-6.5. **CAPTURA:** explorador mostrando los dos `.jar`.
-
----
-
-## Paso 7 — Instalar DBeaver Community (cliente universal)
+## Paso 5 — Instalar DBeaver Community (cliente universal)
 
 DBeaver es el cliente que vas a usar para conectarte a SQL Server, MySQL Staging y MySQL DW.
 
-7.1. Ve a https://dbeaver.io/download/ y descarga "Community Edition · Windows (installer)".
-7.2. Instala con valores por defecto.
-7.3. Ábrelo. Cierra los wizards iniciales (no crees conexiones todavía).
-7.4. **CAPTURA:** DBeaver abierto con su workspace vacío.
+5.1. Ve a https://dbeaver.io/download/ y descarga "Community Edition · Windows (installer)".
+5.2. Instala con valores por defecto.
+5.3. Ábrelo. Cierra los wizards iniciales (no crees conexiones todavía).
+5.4. **CAPTURA:** DBeaver abierto con su workspace vacío.
 
 ---
 
-## Paso 8 — Descargar Tableau Desktop
+## Paso 6 — Descargar Tableau Desktop
 
-8.1. Ve a https://www.tableau.com/academic/students y solicita la licencia gratuita de estudiante (requiere correo institucional + carnet/certificado).
-8.2. Mientras llega el correo de activación, descarga el instalador desde el mismo sitio.
-8.3. Ejecuta el `.exe`. Instala con valores por defecto.
-8.4. Al abrir Tableau pedirá un product key — pégalo cuando llegue (24-48 h normalmente). Si no ha llegado, usa el **trial de 14 días** para no bloquearte.
-8.5. **CAPTURA:** Tableau Desktop abierto en la pantalla de inicio.
+6.1. Ve a https://www.tableau.com/academic/students y solicita la licencia gratuita de estudiante (requiere correo institucional + carnet/certificado).
+6.2. Mientras llega el correo de activación, descarga el instalador desde el mismo sitio.
+6.3. Ejecuta el `.exe`. Instala con valores por defecto.
+6.4. Al abrir Tableau pedirá un product key — pégalo cuando llegue (24-48 h normalmente). Si no ha llegado, usa el **trial de 14 días** para no bloquearte.
+6.5. **CAPTURA:** Tableau Desktop abierto en la pantalla de inicio.
 
 > Nota: la activación del producto se hace al inicio de la Fase 7. Si por ahora solo lo instalas y registras el trial, es suficiente.
 
 ---
 
-## Paso 9 — Descargar el script de Northwind
+## Paso 7 — Descargar el script de Northwind
 
-9.1. Ve a https://github.com/microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs.
-9.2. Descarga el archivo **`instnwnd.sql`** (clic en el archivo → botón "Download raw file").
-9.3. Guárdalo en `C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD\sql\instnwnd.sql` (crea la carpeta `sql\` si no existe).
-9.4. **CAPTURA:** el archivo en el explorador.
+7.1. Ve a https://github.com/microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs.
+7.2. Descarga el archivo **`instnwnd.sql`** (clic en el archivo → botón "Download raw file").
+7.3. Guárdalo en `<RUTA_PROYECTO>\sql\instnwnd.sql`.
+7.4. **CAPTURA:** el archivo en el explorador.
 
 ---
 
-## Paso 10 — Crear estructura de carpetas del proyecto
+## Paso 8 — Verificar estructura de carpetas del proyecto
 
-Dentro de `C:\Users\<TU_USUARIO>\OneDrive\Pictures\Desktop\PROYECTOBD\` deben quedar estas carpetas:
+Dentro de `<RUTA_PROYECTO>\` deben quedar estas carpetas (la mayoría ya están en el repo de Git):
 
 ```
 PROYECTOBD\
-├── docs\                  (los 9 FASE_XX_*.md — ya existe)
-├── sql\                   (instnwnd.sql + tus DDL futuros)
-├── nifi-templates\        (vacía por ahora; guardarás los .xml de NiFi)
-├── tableau\               (vacía por ahora; guardarás los .twb)
-├── ssas\                  (vacía por ahora; proyecto Visual Studio)
+├── docs\                  (los 9 FASE_XX_*.md)
+├── sql\
+│   ├── instnwnd.sql       (lo descargas en el paso 7)
+│   ├── staging-init\      (DDL del staging para auto-arranque MySQL)
+│   └── dw-init\           (DDL del DW para auto-arranque MySQL)
+├── nifi\
+│   └── drivers\           (drivers JDBC del paso 4)
+├── nifi-templates\        (crea tú; aquí guardarás los .json exportados)
+├── tableau\               (crea tú; aquí guardarás los .twb)
+├── ssas\                  (crea tú; proyecto Visual Studio)
 ├── capturas\
-│   ├── 00\
-│   ├── 01\
-│   ├── 02\
-│   ├── 03\
-│   ├── 04\
-│   ├── 05\
-│   ├── 06\
-│   ├── 07\
-│   └── 08\
-├── docker-compose.yml     (vacío por ahora)
+│   ├── 00\ ... 08\        (crea tú)
+├── docker-compose.yml     (ya está en el repo)
 ├── DOCUMENTO_PROYECTO_BI.md
 └── PLAN_DE_TRABAJO.md
 ```
 
-10.1. Crea las carpetas faltantes desde el Explorador de Windows.
-10.2. **CAPTURA:** la estructura final en el explorador.
+8.1. Crea las carpetas que falten (`nifi-templates\`, `tableau\`, `ssas\`, `capturas\00\` … `capturas\08\`) desde el Explorador de Windows.
+8.2. **CAPTURA:** la estructura final en el explorador.
 
 ---
 
@@ -180,13 +151,11 @@ Antes de pasar a la Fase 1 verifica que **TODO** esté en verde:
 
 - [ ] `wsl --status` muestra "Default Version: 2"
 - [ ] `docker run hello-world` funciona
-- [ ] `java -version` muestra OpenJDK 21
-- [ ] `C:\nifi\nifi-2.x.x\` existe con `bin\run-nifi.bat`
-- [ ] `C:\nifi\drivers\` tiene 2 `.jar` (SQL Server + MySQL)
+- [ ] `nifi\drivers\` tiene 2 `.jar` (SQL Server + MySQL)
 - [ ] DBeaver abre sin error
 - [ ] Tableau Desktop instalado (con trial o licencia)
 - [ ] `sql\instnwnd.sql` descargado
 - [ ] Estructura de carpetas del proyecto creada
-- [ ] 9 capturas guardadas en `capturas\00\`
+- [ ] 7 capturas guardadas en `capturas\00\`
 
 Cuando esté listo, avísame con **"Fase 0 lista"** y pasamos a la Fase 1.

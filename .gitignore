@@ -25,6 +25,9 @@ ssas/**/.vs/
 *.user
 *.suo
 
+# Logs de ejecucion (locales, no compartir)
+logs/*.log
+
 # Sistema operativo
 Thumbs.db
 .DS_Store

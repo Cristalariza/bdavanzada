@@ -480,6 +480,267 @@ Por construcción, la meta total es 110% de la venta total → cumplimiento = 1/
 
 ---
 
+---
+
+## Parte 3 — Guion práctico de demostración
+
+Esta sección dice **qué ventana abrir, qué mostrar y qué decir** para cada punto. Sigue el orden si quieres una demo lineal.
+
+### Setup previo (antes de empezar la sustentación)
+
+Ten estas ventanas abiertas y minimizadas, listas para Alt+Tab:
+
+1. **Docker Desktop** (mostrando los 4 contenedores verdes).
+2. **PowerShell** con el comando `docker ps` ya tipeado.
+3. **DBeaver** con las 3 conexiones desplegadas (SQL Server 14333, MySQL Staging 3307, MySQL DW 3306).
+4. **NiFi UI** en `https://localhost:8443/nifi` con los 2 Process Groups visibles.
+5. **SSMS 19** conectado a `localhost\TABULAR` (Analysis Services) con la base `Northwind_Semantico` expandida.
+6. **Tableau Desktop** con `Northwind_BI.twb` abierto en el Dashboard de Resumen.
+7. **VS Code** con `DOCUMENTO_PROYECTO_BI.md` abierto.
+
+### Orden de demostración recomendado
+
+```
+Arquitectura → Fuente → ETL Pipeline 1 → Staging → ETL Pipeline 2 → DW → Modelo Semántico → Tableau
+```
+
+Esto te lleva por la línea de tiempo del dato: desde Northwind crudo hasta el dashboard final.
+
+---
+
+## Parte 4 — Cómo demostrar el modelo semántico
+
+El modelo semántico es probablemente lo que diferencia este proyecto de uno "simple". Hay que enseñarlo desde 3 ángulos distintos para que el jurado entienda qué es y por qué importa.
+
+### Vista 1 — Servicio corriendo en el SO (15 segundos)
+
+**Qué mostrar:**
+- Abre **services.msc** (Win+R → services.msc).
+- Busca **SQL Server Analysis Services (TABULAR)** → resaltar el estado **"En ejecución"**.
+
+**Qué decir:**
+> *"El cuarto servidor es un servicio nativo de Windows porque Microsoft no publica imagen Docker de SSAS. Está corriendo aquí en estado Running, escuchando en la instancia TABULAR. Es un proceso aparte del motor relacional — `msmdsrv.exe` — optimizado para consultas analíticas en memoria."*
+
+### Vista 2 — Estructura del modelo en SSMS (30 segundos)
+
+**Qué mostrar:**
+- En SSMS 19, expande **Databases → Northwind_Semantico → Tables**.
+- Muestra las 8 tablas con sus filas (`fact_ventas: 2155 rows`, etc).
+- Expande **fact_ventas → Measures**.
+- Muestra las 14 medidas DAX listadas.
+
+**Qué decir:**
+> *"Aquí está el modelo desplegado. 8 tablas formando un esquema estrella, 7 relaciones, y 14 medidas DAX que centralizan la lógica de negocio. Todo esto es código versionado en mi repo bajo `ssas/01_create_modelo.xmla` — el modelo es 100% reproducible desde Git, no depende de un IDE."*
+
+**Qué consulta ejecutar (para demostrar que funciona):**
+
+Clic derecho sobre `Northwind_Semantico` → **New Query → MDX**:
+
+```dax
+EVALUATE
+SUMMARIZECOLUMNS (
+  dim_tiempo[anio],
+  "Ventas Netas", [Ventas Netas],
+  "Margen Total", [Margen Total],
+  "% Contribucion", [% Contribucion]
+)
+ORDER BY dim_tiempo[anio]
+```
+
+F5. Devuelve 3 filas (1996, 1997, 1998) con totales. Eso demuestra que las medidas DAX viven en el modelo, no en Tableau.
+
+### Vista 3 — Modelo conectado desde Tableau (15 segundos)
+
+**Qué mostrar:**
+- En Tableau, ir a la pestaña **Origen de datos** (abajo).
+- Muestra:
+  - "Conectado a Microsoft SQL Server Analysis Services localhost\TABULAR"
+  - Cubo `Northwind_Semantico` → Model
+  - Lista de Campos con las medidas y dimensiones.
+
+**Qué decir:**
+> *"Tableau no calcula nada — solo arrastra los campos del cubo. Cuando arrastro 'Ventas Netas' a un gráfico, Tableau emite una consulta MDX al SSAS, SSAS agrega los datos en memoria y devuelve el resultado en milisegundos. Si mañana cambio la fórmula de 'Ventas Netas' en el modelo, todos los dashboards actualizan automáticamente sin tocar Tableau."*
+
+### Ubicación física para la pregunta "¿dónde está?"
+
+| Capa | Ubicación |
+|---|---|
+| Servicio corriendo | Proceso `msmdsrv.exe` en Windows |
+| Datos en disco | `C:\Program Files\Microsoft SQL Server\MSAS17.TABULAR\OLAP\Data` |
+| Definición versionada | `ssas/01_create_modelo.xmla` en el repo Git |
+| Datos cargados | Cargados desde MySQL DW vía DSN ODBC `DW_NORTHWIND` (System.Data.Odbc) |
+| Acceso vía red | Puerto dinámico vía SQL Server Browser (puerto 2382 broker) |
+
+---
+
+## Parte 5 — Cómo defender cada pregunta de negocio (con pantallas)
+
+Para cada pregunta: qué hoja abrir, qué resaltar con el mouse, qué números mencionar.
+
+### Q1 — Ventas por periodo
+
+**Mostrar**: hoja `Q1_Ventas_Por_Periodo` (o el Dashboard de Resumen donde aparece).
+
+**Cómo señalarlo:**
+- Pasa el mouse sobre la **línea de 1997** (debe verse plana en ~50k mensuales).
+- Resalta el pico de **abril 1998** (~125k).
+- Aplica filtro de año a 1997 → la línea muestra un detalle por mes.
+
+**Qué decir:**
+> *"Pasamos de iniciar operaciones en julio de 1996 con 28k mensuales, a un pico de 125k en abril de 1998 — crecimiento sostenido año a año. El filtro de año arriba permite hacer drill-down por mes."*
+
+**Filtros visibles que debe haber:** Año, País.
+
+### Q2 — Top 10 clientes
+
+**Mostrar**: hoja `Q2_Top10_Clientes`.
+
+**Cómo señalarlo:**
+- Apunta a las 3 barras superiores: **QUICK-Stop ($110k), Save-a-lot Markets ($104k), Ernst Handel ($104k)**.
+- Pasa el mouse sobre cada una para mostrar el tooltip.
+
+**Qué decir:**
+> *"Los 3 clientes más valiosos concentran cerca del 24% de las ventas totales. QUICK-Stop el #1 con 110k. Si filtro por año puedo ver si su comportamiento cambió — en 1997 era todavía más dominante."*
+
+### Q3 — Productos más vendidos
+
+**Mostrar**: hoja `Q3_Productos_Top`.
+
+**Cómo señalarlo:**
+- Camembert Pierrot arriba con 1,577 unidades.
+- Resalta el porcentaje al lado de cada barra (% Contribución).
+
+**Qué decir:**
+> *"Top 15 productos por volumen. Camembert Pierrot lidera con 5.62% de contribución total. Es una distribución larga: los top 15 representan ~30% del volumen — el resto se reparte en los 62 productos siguientes."*
+
+### Q4 — Categorías
+
+**Mostrar**: hoja `Q4_Categorias` (treemap).
+
+**Cómo señalarlo:**
+- Beverages el bloque más grande arriba-izquierda (21.16%).
+- Dairy Products debajo (18.53%).
+
+**Qué decir:**
+> *"Las 2 categorías líderes — Beverages y Dairy Products — concentran ~40% de las ventas. La distribución visual hace evidente la prioridad de inversión publicitaria y stock."*
+
+### Q5 — Empleados vs Metas (⚠ con filtro mensual obligatorio)
+
+**Mostrar**: hoja `Q5_Empleados_vs_Metas`.
+
+**Cómo señalarlo:**
+- **Primero sin filtros**: todos muestran 90.91% — explica el por qué.
+- **Luego con filtro Año=1997, Mes=9**: ahora Margaret Peacock ~112%, Steven Buchanan ~78%.
+
+**Qué decir:**
+> *"La meta se calculó como el promedio histórico × 1.10. Por construcción matemática, el cumplimiento en agregado total siempre dará 90.91% — no es bug, es el diseño. Para evaluación real, **el dashboard se opera con filtro mensual obligatorio**. Aquí en septiembre 1997 vemos que Margaret Peacock está al 112%, Janet Leverling al 95% y Steven Buchanan al 78% — eso sí permite feedback al equipo."*
+
+**Filtros visibles que debe haber:** Año (dropdown), Mes (dropdown).
+
+### Q6 — Territorios
+
+**Mostrar**: hoja `Q6_Territorios` (mapa mundial).
+
+**Cómo señalarlo:**
+- Burbujas grandes sobre **Estados Unidos y Alemania**.
+- Burbujas pequeñas o ausentes en Latinoamérica y Asia.
+
+**Qué decir:**
+> *"USA y Alemania concentran el mayor volumen. Latinoamérica tiene presencia mínima — solo Brasil, Venezuela y México. Eso señala una oportunidad clara de crecimiento si el negocio quisiera expansión geográfica."*
+
+### Q7 — Tiempos de entrega
+
+**Mostrar**: hoja `Q7_Tiempos_Entrega`.
+
+**Cómo señalarlo:**
+- Ireland arriba (~12 días, el peor).
+- Finland abajo (~5 días, el mejor).
+- Línea de referencia con el promedio global ~8.5 días.
+
+**Qué decir:**
+> *"Ireland tarda 12 días en promedio entregar — 40% por encima del promedio global. Eso indica un problema logístico que debe atacarse: probablemente único transportista, baja frecuencia de despacho. Finland en cambio entrega en 5 días por su cercanía geográfica a Suecia, donde está nuestro hub."*
+
+### Q8 — Margen de rentabilidad
+
+**Mostrar**: hoja `Q8_Margen_Producto`.
+
+**Cómo señalarlo:**
+- Côte de Blaye en el tope con ~$45k de margen.
+- Tooltip muestra que tiene precio unitario alto.
+
+**Qué decir:**
+> *"Top 15 productos por margen absoluto, no por volumen. Côte de Blaye lidera con $45k — es un vino premium que se vende poco pero con margen alto. Estrategia distinta del top de Q3 que prioriza volumen. El costo aquí es un supuesto del 60% del precio venta, documentado en el Anexo D del proyecto."*
+
+### Q9 — Clientes inactivos
+
+**Mostrar**: hojas `Q9_Clientes_Inactivos` y `Q9b_Clientes_En_Riesgo`.
+
+**Cómo señalarlo:**
+- En Inactivos: resalta los con bar más larga (>700 días sin comprar).
+- Apunta al label de Ventas Netas — diferencia clientes marginales vs significativos.
+
+**Qué decir:**
+> *"Tenemos N clientes inactivos (>365 días) que representan $X en ventas históricas. Pero hay que mirarlo con cuidado: Centro comercial Moctezuma facturó solo $100 — pérdida marginal, no vale campaña. Mère Paillarde con $29k sí es prioritaria. La estrategia: priorizar re-engagement por **valor histórico**, no por todos los inactivos."*
+
+### Q10 — Estacionalidad
+
+**Mostrar**: hoja `Q10_Estacionalidad` (heatmap).
+
+**Cómo señalarlo:**
+- Cuadrados oscuros en **diciembre 1997** (fin de año fiscal).
+- **Abril 1998** el pico absoluto.
+- Cuadrados claros en mayo-junio (caída estacional).
+
+**Qué decir:**
+> *"El heatmap muestra patrones estacionales claros: picos en cierre de año y arranque de Q2, caída en mayo-junio. Esa info permite planear inventario y staff: stockear más en Q4, recortar en mayo. Información estratégica para finanzas y operaciones."*
+
+---
+
+## Parte 6 — Si el jurado pregunta algo no preparado
+
+### "¿Cómo sabemos que el ETL no perdió datos?"
+
+Abre DBeaver y ejecuta en paralelo:
+
+```sql
+-- SQL Server (fuente)
+USE Northwind;
+SELECT ROUND(SUM(od.UnitPrice * od.Quantity * (1 - od.Discount)), 2) AS total_fuente
+FROM [Order Details] od;
+-- Resultado esperado: 1,265,793.04
+```
+
+```sql
+-- MySQL DW (destino)
+SELECT ROUND(SUM(venta_neta), 2) AS total_dw
+FROM dw_northwind.fact_ventas;
+-- Resultado esperado: 1,265,793.04
+```
+
+> *"Los 2 números coinciden al centavo. El ETL preserva integridad: no pierde ni distorsiona datos."*
+
+### "¿Por qué Docker?"
+
+> *"Docker me da reproducibilidad y aislamiento. Cualquiera con el repo Git clona, corre `docker-compose up`, y tiene mi misma infraestructura en 5 minutos. SQL Server, los 2 MySQL y NiFi corren cada uno en su contenedor — independientes, sin instalación local."*
+
+### "¿Por qué NiFi en lugar de SSIS?"
+
+> *"NiFi es agnóstico de proveedor (no depende de Microsoft), tiene UI gráfica con monitoreo en tiempo real, y es la herramienta de mercado para data flows modernos (Apache, open source, usada en producción por NSA, banca, telcos). SSIS me obligaría a estar en ecosistema Microsoft completo. Como tengo MySQL en el destino, NiFi es más natural."*
+
+### "¿Por qué 2 servidores MySQL en lugar de 1?"
+
+> *"Separación de Staging (espejo crudo, lectura-escritura intensa) vs DW (modelo estrella, optimizado para consultas analíticas). En producción tendrían afinaciones distintas: el Staging puede correr en SSD rápido, el DW en almacenamiento más barato. Si los junto en uno, comprometo ambos."*
+
+### "¿Y si quiero agregar una pregunta de negocio nueva mañana?"
+
+> *"Si la respuesta sale del modelo actual: agrego una medida DAX nueva al `01_create_modelo.xmla`, lo re-deploy, refresco Tableau, agrego una hoja. 30 minutos. Si necesito una dimensión nueva: agrego la tabla al DW, modifico Pipeline 2 para poblarla, agrego una `dim_*` al modelo. 2 horas. La arquitectura es extensible por diseño."*
+
+### "¿Qué pasa si SSAS se cae?"
+
+> *"Tableau no puede consultar — los dashboards quedan en blanco. PERO los datos NO se pierden: están en el DW MySQL (capa de persistencia). Reinicio SSAS, el modelo se recarga automáticamente, en 30 segundos los dashboards vuelven a vivir."*
+
+---
+
 ## Resumen de ajustes a hacer antes de la sustentación
 
 1. ⚠ **Arreglar Q9 a "Clientes Inactivos"** según las instrucciones del punto 9. **15 minutos.**

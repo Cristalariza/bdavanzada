@@ -111,6 +111,9 @@ services:
       - nifi_conf:/opt/nifi/nifi-current/conf
       # Drivers JDBC: pon aquí mssql-jdbc-*.jar y mysql-connector-j-*.jar
       - ./nifi/drivers:/opt/nifi/nifi-current/extra-jars
+      # Triggers de integración NiFi → SSAS: NiFi escribe aquí archivos bandera
+      # que el watcher PowerShell en Windows detecta para disparar el refresh.
+      - ./nifi-triggers:/opt/nifi/nifi-current/triggers
     networks:
       - bi_network
     depends_on:

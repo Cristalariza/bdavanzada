@@ -117,7 +117,126 @@ Al día siguiente cuando alguien abra Tableau, los datos están frescos.
 
 ---
 
-## Enfoque B — Orquestación con NiFi (avanzado)
+## Enfoque B (RECOMENDADO) — File trigger: NiFi → Windows en tiempo real
+
+Este enfoque es **event-driven**: NiFi avisa a Windows que el ETL terminó, y Windows refresca SSAS inmediatamente. Sin ventanas de tiempo, sin polling.
+
+### Arquitectura
+
+```
+Pipeline 2 termina → NiFi PutFile escribe nifi-triggers\refresh.flag
+                                              ↓
+                  Volumen compartido entre Docker (Linux) y Windows
+                                              ↓
+                  PowerShell watch_and_refresh.ps1 detecta el archivo
+                                              ↓
+                  Ejecuta refresh_ssas.ps1 → SSAS actualiza
+                                              ↓
+                  Borra el .flag y vuelve a esperar
+```
+
+### Componentes ya implementados en el repo
+
+| Componente | Ubicación | Estado |
+|---|---|---|
+| Volumen Docker para triggers | `docker-compose.yml` línea `./nifi-triggers:/opt/nifi/nifi-current/triggers` | ✓ |
+| Carpeta compartida | `nifi-triggers/` | ✓ creada |
+| Watcher PowerShell | `scripts/watch_and_refresh.ps1` | ✓ |
+| Script de refresh | `scripts/refresh_ssas.ps1` | ✓ probado |
+
+### Setup en 4 pasos
+
+#### Paso 1 — Reiniciar el contenedor NiFi para montar el volumen nuevo
+
+```powershell
+docker compose down nifi
+docker compose up -d nifi
+```
+
+> Espera 2-3 min a que NiFi vuelva a estar disponible en `https://localhost:8443/nifi`.
+
+#### Paso 2 — Agregar el procesador PutFile al final de Pipeline 2
+
+En NiFi → Pipeline 2 → al final del subflujo `fact_ventas` (después de `LOAD fact_ventas + dim_metas`):
+
+1. Arrastra **Processor → PutFile**.
+2. Doble clic → Settings → Name: `Trigger SSAS Refresh`.
+3. Properties:
+
+| Property | Value |
+|---|---|
+| Directory | `/opt/nifi/nifi-current/triggers` |
+| Conflict Resolution Strategy | `replace` |
+| Create Missing Directories | `true` |
+
+4. Relationships → ☑ terminate en `success`, `failure`.
+5. Apply.
+
+#### Paso 3 — Conectar `LOAD fact_ventas + dim_metas` → `Trigger SSAS Refresh`
+
+Arrastra una flecha entre los 2 procesadores → relación `success` → Add.
+
+#### Paso 4 — Programar el watcher en Task Scheduler (que arranque automático)
+
+1. Win+R → `taskschd.msc` → Enter.
+2. **Crear tarea** (no "tarea básica").
+3. Pestaña **General**:
+   - Nombre: `BI Northwind - Watcher Refresh SSAS`
+   - ☑ Ejecutar tanto si el usuario está conectado como si no.
+   - ☑ Ejecutar con los privilegios más altos.
+   - Configurar para: Windows 10.
+4. Pestaña **Desencadenadores** → Nuevo:
+   - Iniciar la tarea: **Al iniciar el sistema**.
+   - ☑ Habilitado.
+5. Pestaña **Acciones** → Nueva:
+   - Acción: **Iniciar un programa**.
+   - Programa: `powershell.exe`
+   - Argumentos: `-ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Users\crist\OneDrive\Pictures\Desktop\PROYECTOBD\scripts\watch_and_refresh.ps1"`
+   - Iniciar en: `C:\Users\crist\OneDrive\Pictures\Desktop\PROYECTOBD\`
+6. Pestaña **Configuración** → desmarcar "Detener la tarea si se ejecuta más de..."
+7. OK → pide password Windows.
+
+#### Paso 5 — Iniciar el watcher manualmente (primera vez, para validar)
+
+```powershell
+.\scripts\watch_and_refresh.ps1
+```
+
+Déjalo corriendo. En otra ventana de PowerShell, simula NiFi:
+
+```powershell
+echo "test" > nifi-triggers\refresh-test.flag
+```
+
+El watcher debe detectarlo en <1 segundo, ejecutar el refresh, y borrar el archivo. Revisa `logs/watcher.log` y `logs/ssas_refresh.log`.
+
+### Cómo se ve en producción
+
+```
+03:00:00 - NiFi (cron) ejecuta Pipeline 1 (extracción incremental)
+03:02:34 - Pipeline 1 termina
+03:30:00 - NiFi (cron) ejecuta Pipeline 2 (transformaciones)
+03:30:45 - LOAD fact_ventas termina → escribe nifi-triggers\refresh-20260609-033045.flag
+03:30:46 - Watcher detecta el flag → ejecuta refresh_ssas.ps1
+03:30:48 - SSAS terminado de refrescar
+03:30:48 - Watcher borra el flag y vuelve a esperar
+```
+
+**Total**: <3 segundos entre que termina el ETL y los dashboards de Tableau están actualizados.
+
+### Ventajas vs el Enfoque A (cascada de horarios)
+
+| | Enfoque A (horarios fijos) | Enfoque B (file trigger) |
+|---|---|---|
+| Sincronización | Asume tiempos | Event-driven, sin asunciones |
+| Riesgo si ETL demora más | Refresh corre con datos viejos | Refresh espera a que termine |
+| Latencia entre ETL y refresh | 30 min de espera fija | <3 segundos |
+| Configuración | 2 tareas separadas | 1 watcher continuo |
+| Resiliencia | Falla silenciosa si ETL demora | El flag asegura el orden |
+
+---
+
+## Enfoque C — Orquestación con NiFi (avanzado)
 
 NiFi puede llamar al refresh de SSAS al final de Pipeline 2, eliminando las ventanas de tiempo fijas.
 

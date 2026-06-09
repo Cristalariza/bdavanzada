@@ -1,0 +1,58 @@
+{
+  "sequence": {
+    "operations": [
+      {
+        "create": {
+          "parentObject": {
+            "database": "Northwind_Semantico",
+            "table": "fact_ventas"
+          },
+          "measure": {
+            "name": "Ultima Compra",
+            "expression": "MAX ( dim_tiempo[fecha] )",
+            "formatString": "yyyy-mm-dd"
+          }
+        }
+      },
+      {
+        "create": {
+          "parentObject": {
+            "database": "Northwind_Semantico",
+            "table": "fact_ventas"
+          },
+          "measure": {
+            "name": "Dias Sin Comprar",
+            "expression": "DATEDIFF ( [Ultima Compra], DATE ( 1998, 5, 6 ), DAY )",
+            "formatString": "#,##0"
+          }
+        }
+      },
+      {
+        "create": {
+          "parentObject": {
+            "database": "Northwind_Semantico",
+            "table": "fact_ventas"
+          },
+          "measure": {
+            "name": "Es Inactivo",
+            "expression": "IF ( [Dias Sin Comprar] > 365, 1, 0 )",
+            "formatString": "0"
+          }
+        }
+      },
+      {
+        "create": {
+          "parentObject": {
+            "database": "Northwind_Semantico",
+            "table": "fact_ventas"
+          },
+          "measure": {
+            "name": "En Riesgo",
+            "expression": "IF ( [Dias Sin Comprar] > 180 && [Dias Sin Comprar] <= 365, 1, 0 )",
+            "formatString": "0"
+          }
+        }
+      }
+    ]
+  }
+}

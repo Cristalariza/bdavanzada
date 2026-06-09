@@ -1,0 +1,314 @@
+{
+  "createOrReplace": {
+    "object": {
+      "database": "Northwind_Semantico"
+    },
+    "database": {
+      "name": "Northwind_Semantico",
+      "compatibilityLevel": 1500,
+      "model": {
+        "culture": "es-CO",
+        "dataSources": [
+          {
+            "type": "provider",
+            "name": "DW Northwind MySQL",
+            "connectionString": "DSN=DW_NORTHWIND;UID=root;PWD=Northwind2026!;",
+            "impersonationMode": "impersonateServiceAccount",
+            "provider": "System.Data.Odbc"
+          }
+        ],
+        "tables": [
+          {
+            "name": "dim_cliente",
+            "columns": [
+              { "name": "cliente_sk",   "dataType": "int64",  "sourceColumn": "cliente_sk" },
+              { "name": "customer_id",  "dataType": "string", "sourceColumn": "customer_id" },
+              { "name": "company_name", "dataType": "string", "sourceColumn": "company_name" },
+              { "name": "contact_name", "dataType": "string", "sourceColumn": "contact_name" },
+              { "name": "city",         "dataType": "string", "sourceColumn": "city" },
+              { "name": "country",      "dataType": "string", "sourceColumn": "country" }
+            ],
+            "partitions": [
+              {
+                "name": "dim_cliente",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT cliente_sk, customer_id, company_name, contact_name, city, country FROM dim_cliente",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ]
+          },
+          {
+            "name": "dim_empleado",
+            "columns": [
+              { "name": "empleado_sk",        "dataType": "int64",    "sourceColumn": "empleado_sk" },
+              { "name": "employee_id",        "dataType": "int64",    "sourceColumn": "employee_id" },
+              { "name": "nombre_completo",    "dataType": "string",   "sourceColumn": "nombre_completo" },
+              { "name": "titulo",             "dataType": "string",   "sourceColumn": "titulo" },
+              { "name": "pais",               "dataType": "string",   "sourceColumn": "pais" },
+              { "name": "fecha_contratacion", "dataType": "dateTime", "sourceColumn": "fecha_contratacion" }
+            ],
+            "partitions": [
+              {
+                "name": "dim_empleado",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT empleado_sk, employee_id, nombre_completo, titulo, pais, fecha_contratacion FROM dim_empleado",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ]
+          },
+          {
+            "name": "dim_producto",
+            "columns": [
+              { "name": "producto_sk",      "dataType": "int64",   "sourceColumn": "producto_sk" },
+              { "name": "product_id",       "dataType": "int64",   "sourceColumn": "product_id" },
+              { "name": "product_name",     "dataType": "string",  "sourceColumn": "product_name" },
+              { "name": "category_name",    "dataType": "string",  "sourceColumn": "category_name" },
+              { "name": "supplier_name",    "dataType": "string",  "sourceColumn": "supplier_name" },
+              { "name": "supplier_country", "dataType": "string",  "sourceColumn": "supplier_country" },
+              { "name": "unit_price",       "dataType": "decimal", "sourceColumn": "unit_price" },
+              { "name": "discontinued",     "dataType": "int64",   "sourceColumn": "discontinued" }
+            ],
+            "partitions": [
+              {
+                "name": "dim_producto",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT producto_sk, product_id, product_name, category_name, supplier_name, supplier_country, unit_price, discontinued FROM dim_producto",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ]
+          },
+          {
+            "name": "dim_transportista",
+            "columns": [
+              { "name": "transportista_sk", "dataType": "int64",  "sourceColumn": "transportista_sk" },
+              { "name": "shipper_id",       "dataType": "int64",  "sourceColumn": "shipper_id" },
+              { "name": "company_name",     "dataType": "string", "sourceColumn": "company_name" }
+            ],
+            "partitions": [
+              {
+                "name": "dim_transportista",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT transportista_sk, shipper_id, company_name FROM dim_transportista",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ]
+          },
+          {
+            "name": "dim_geografia",
+            "columns": [
+              { "name": "geografia_sk", "dataType": "int64",  "sourceColumn": "geografia_sk" },
+              { "name": "ciudad",       "dataType": "string", "sourceColumn": "ciudad" },
+              { "name": "region",       "dataType": "string", "sourceColumn": "region" },
+              { "name": "pais",         "dataType": "string", "sourceColumn": "pais" }
+            ],
+            "partitions": [
+              {
+                "name": "dim_geografia",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT geografia_sk, ciudad, region, pais FROM dim_geografia",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ]
+          },
+          {
+            "name": "dim_tiempo",
+            "columns": [
+              { "name": "tiempo_sk",      "dataType": "int64",    "sourceColumn": "tiempo_sk" },
+              { "name": "fecha",          "dataType": "dateTime", "sourceColumn": "fecha" },
+              { "name": "anio",           "dataType": "int64",    "sourceColumn": "anio" },
+              { "name": "trimestre",      "dataType": "int64",    "sourceColumn": "trimestre" },
+              { "name": "mes",            "dataType": "int64",    "sourceColumn": "mes" },
+              { "name": "nombre_mes",     "dataType": "string",   "sourceColumn": "nombre_mes" },
+              { "name": "dia",            "dataType": "int64",    "sourceColumn": "dia" },
+              { "name": "dia_semana",     "dataType": "int64",    "sourceColumn": "dia_semana" },
+              { "name": "nombre_dia",     "dataType": "string",   "sourceColumn": "nombre_dia" },
+              { "name": "es_fin_semana",  "dataType": "int64",    "sourceColumn": "es_fin_semana" }
+            ],
+            "partitions": [
+              {
+                "name": "dim_tiempo",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT tiempo_sk, fecha, anio, trimestre, mes, nombre_mes, dia, dia_semana, nombre_dia, es_fin_semana FROM dim_tiempo",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ]
+          },
+          {
+            "name": "dim_metas",
+            "columns": [
+              { "name": "meta_sk",      "dataType": "int64",   "sourceColumn": "meta_sk" },
+              { "name": "empleado_sk",  "dataType": "int64",   "sourceColumn": "empleado_sk" },
+              { "name": "anio",         "dataType": "int64",   "sourceColumn": "anio" },
+              { "name": "mes",          "dataType": "int64",   "sourceColumn": "mes" },
+              { "name": "meta_mensual", "dataType": "decimal", "sourceColumn": "meta_mensual" }
+            ],
+            "partitions": [
+              {
+                "name": "dim_metas",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT meta_sk, empleado_sk, anio, mes, meta_mensual FROM dim_metas",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ]
+          },
+          {
+            "name": "fact_ventas",
+            "columns": [
+              { "name": "venta_sk",         "dataType": "int64",   "sourceColumn": "venta_sk" },
+              { "name": "tiempo_sk",        "dataType": "int64",   "sourceColumn": "tiempo_sk" },
+              { "name": "cliente_sk",       "dataType": "int64",   "sourceColumn": "cliente_sk" },
+              { "name": "producto_sk",      "dataType": "int64",   "sourceColumn": "producto_sk" },
+              { "name": "empleado_sk",      "dataType": "int64",   "sourceColumn": "empleado_sk" },
+              { "name": "geografia_sk",     "dataType": "int64",   "sourceColumn": "geografia_sk" },
+              { "name": "transportista_sk", "dataType": "int64",   "sourceColumn": "transportista_sk" },
+              { "name": "order_id",         "dataType": "int64",   "sourceColumn": "order_id" },
+              { "name": "cantidad",         "dataType": "int64",   "sourceColumn": "cantidad" },
+              { "name": "precio_unitario",  "dataType": "decimal", "sourceColumn": "precio_unitario" },
+              { "name": "descuento",        "dataType": "double",  "sourceColumn": "descuento" },
+              { "name": "venta_bruta",      "dataType": "decimal", "sourceColumn": "venta_bruta" },
+              { "name": "venta_neta",       "dataType": "decimal", "sourceColumn": "venta_neta" },
+              { "name": "costo_total",      "dataType": "decimal", "sourceColumn": "costo_total" },
+              { "name": "margen",           "dataType": "decimal", "sourceColumn": "margen" },
+              { "name": "dias_entrega",     "dataType": "int64",   "sourceColumn": "dias_entrega" }
+            ],
+            "partitions": [
+              {
+                "name": "fact_ventas",
+                "mode": "import",
+                "source": {
+                  "type": "query",
+                  "query": "SELECT venta_sk, tiempo_sk, cliente_sk, producto_sk, empleado_sk, geografia_sk, transportista_sk, order_id, cantidad, precio_unitario, descuento, venta_bruta, venta_neta, costo_total, margen, dias_entrega FROM fact_ventas",
+                  "dataSource": "DW Northwind MySQL"
+                }
+              }
+            ],
+            "measures": [
+              {
+                "name": "Ventas Netas",
+                "expression": "SUM ( fact_ventas[venta_neta] )",
+                "formatString": "#,##0.00"
+              },
+              {
+                "name": "Ventas Anio Anterior",
+                "expression": "CALCULATE ( [Ventas Netas], SAMEPERIODLASTYEAR ( dim_tiempo[fecha] ) )",
+                "formatString": "#,##0.00"
+              },
+              {
+                "name": "Ventas YoY %",
+                "expression": "VAR _act = [Ventas Netas] VAR _ant = [Ventas Anio Anterior] RETURN DIVIDE ( _act - _ant, _ant )",
+                "formatString": "0.00%"
+              },
+              {
+                "name": "Cantidad Vendida",
+                "expression": "SUM ( fact_ventas[cantidad] )",
+                "formatString": "#,##0"
+              },
+              {
+                "name": "% Contribucion",
+                "expression": "DIVIDE ( [Ventas Netas], CALCULATE ( [Ventas Netas], ALL ( fact_ventas ) ) )",
+                "formatString": "0.00%"
+              },
+              {
+                "name": "Meta Mensual",
+                "expression": "SUM ( dim_metas[meta_mensual] )",
+                "formatString": "#,##0.00"
+              },
+              {
+                "name": "Cumplimiento Meta %",
+                "expression": "DIVIDE ( [Ventas Netas], [Meta Mensual] )",
+                "formatString": "0.00%"
+              },
+              {
+                "name": "Dias Entrega Promedio",
+                "expression": "AVERAGEX ( FILTER ( fact_ventas, NOT ISBLANK ( fact_ventas[dias_entrega] ) ), fact_ventas[dias_entrega] )",
+                "formatString": "0.0"
+              },
+              {
+                "name": "Margen Total",
+                "expression": "SUM ( fact_ventas[margen] )",
+                "formatString": "#,##0.00"
+              },
+              {
+                "name": "Clientes Activos",
+                "expression": "CALCULATE ( DISTINCTCOUNT ( fact_ventas[cliente_sk] ), DATESINPERIOD ( dim_tiempo[fecha], MAX ( dim_tiempo[fecha] ), -365, DAY ) )",
+                "formatString": "#,##0"
+              }
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "name": "rel_fact_tiempo",
+            "fromTable": "fact_ventas",
+            "fromColumn": "tiempo_sk",
+            "toTable": "dim_tiempo",
+            "toColumn": "tiempo_sk"
+          },
+          {
+            "name": "rel_fact_cliente",
+            "fromTable": "fact_ventas",
+            "fromColumn": "cliente_sk",
+            "toTable": "dim_cliente",
+            "toColumn": "cliente_sk"
+          },
+          {
+            "name": "rel_fact_producto",
+            "fromTable": "fact_ventas",
+            "fromColumn": "producto_sk",
+            "toTable": "dim_producto",
+            "toColumn": "producto_sk"
+          },
+          {
+            "name": "rel_fact_empleado",
+            "fromTable": "fact_ventas",
+            "fromColumn": "empleado_sk",
+            "toTable": "dim_empleado",
+            "toColumn": "empleado_sk"
+          },
+          {
+            "name": "rel_fact_geografia",
+            "fromTable": "fact_ventas",
+            "fromColumn": "geografia_sk",
+            "toTable": "dim_geografia",
+            "toColumn": "geografia_sk"
+          },
+          {
+            "name": "rel_fact_transportista",
+            "fromTable": "fact_ventas",
+            "fromColumn": "transportista_sk",
+            "toTable": "dim_transportista",
+            "toColumn": "transportista_sk"
+          },
+          {
+            "name": "rel_metas_empleado",
+            "fromTable": "dim_metas",
+            "fromColumn": "empleado_sk",
+            "toTable": "dim_empleado",
+            "toColumn": "empleado_sk"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -217,6 +217,158 @@ GenerateFlowFile → PutSQL          → ExecuteSQLRecord → PutDatabaseRecord
 
 ---
 
+---
+
+## Parte 1.B — El modelo semántico y el cuarto servidor (SSAS Tabular)
+
+Esta es probablemente la pregunta más exigente del jurado: "¿por qué un cuarto servidor solo para análisis?". Tener una respuesta clara y técnica suma puntos.
+
+### ¿Qué es un modelo semántico?
+
+Un **modelo semántico** es una capa lógica de negocio que se monta encima de un Data Warehouse físico. Su rol:
+
+| Aspecto | DW físico (MySQL) | Modelo semántico (SSAS Tabular) |
+|---|---|---|
+| Almacenamiento | Tablas relacionales en disco | Compresión columnar en memoria (Vertipaq) |
+| Estructura visible | Tablas con FK | "Cubo" con dimensiones, medidas y jerarquías |
+| Lenguaje | SQL (relacional) | DAX (analítico) y MDX (multidimensional) |
+| Optimización | Para escrituras transaccionales | Para agregaciones masivas |
+| Reglas de negocio | Cada herramienta calcula a su modo | Centralizadas como medidas DAX → resultados idénticos en todos los reportes |
+| Audiencia | DBA / desarrolladores | Analistas / usuarios finales |
+
+En resumen: el DW es el "depósito de hechos", el modelo semántico es la "vista de negocio amigable" donde Ventas Netas, Margen y Cumplimiento Meta significan **exactamente lo mismo** sin importar quién pregunte ni desde qué herramienta.
+
+### ¿Por qué un cuarto servidor solo para SSAS?
+
+**Argumento 1 — Separación de responsabilidades (Single Responsibility Principle aplicado a infraestructura):**
+
+| Servidor | Rol único | Optimización |
+|---|---|---|
+| 1. SQL Server (Northwind) | OLTP fuente | Transacciones rápidas, integridad |
+| 2. MySQL Staging | Buffer ETL | Escritura masiva sin restricciones |
+| 3. MySQL DW | Bodega histórica | Schema estrella, consultas analíticas SQL |
+| 4. SSAS Tabular | Capa semántica | Agregaciones in-memory, DAX, jerarquías |
+
+Cada servidor está afinado para un patrón de carga distinto. Mezclarlos en uno solo obliga a comprometer la afinación de todos.
+
+**Argumento 2 — Performance (in-memory vs. disco):**
+
+SSAS Tabular usa **Vertipaq**, un motor columnar comprimido residente en RAM. Cuando Tableau pide "Ventas Netas por categoría y mes", SSAS responde en **decenas de milisegundos** porque:
+1. Los datos están comprimidos 10-15x en RAM (no toca disco).
+2. Las agregaciones son nativas (no recorre filas, opera sobre vectores).
+3. Las jerarquías de tiempo están pre-indexadas para drill-down.
+
+Si Tableau preguntara directamente al MySQL DW, cada query sería un `JOIN + GROUP BY + SUM` recorriendo 2155 filas en disco. Bien para una tabla, mal para un dashboard con 8 visualizaciones simultáneas.
+
+**Argumento 3 — Lógica de negocio centralizada:**
+
+Las 10 medidas DAX (`Ventas Netas`, `Cumplimiento Meta %`, `% Contribucion`, etc.) viven dentro del modelo. Si mañana cambia la definición de "Ventas Netas" (ej. excluir devoluciones), se modifica **un solo lugar** y todos los reportes actualizan. Si en cambio cada herramienta calculara su propia fórmula en SQL, habría inconsistencias entre Tableau, Excel y Power BI.
+
+**Argumento 4 — Escalabilidad de usuarios:**
+
+El modelo Tabular soporta **decenas de usuarios concurrentes** consultando dashboards sin degradar el rendimiento del DW. Sin SSAS, cada vista de Tableau dispararía SQL contra el DW, saturando conexiones y bloqueos. Con SSAS, el DW solo se toca cuando se refresca el modelo (1 vez al día), no en cada consulta de usuario.
+
+**Argumento 5 — Compatibilidad ecosistema Microsoft + Tableau:**
+
+SSAS Tabular es el estándar de facto para conexión BI en Windows. Tableau, Power BI, Excel, todos hablan **nativamente con SSAS** vía XMLA/MDX. No necesitas conectores extra, drivers ODBC ni configuraciones por usuario — Tableau ve un cubo y arrastras campos.
+
+### ¿Dónde está el modelo semántico?
+
+**Localización física:**
+
+| | |
+|---|---|
+| Servidor | `localhost\TABULAR` (o `KARASU\TABULAR`) |
+| Base de datos SSAS | `Northwind_Semantico` |
+| Proceso del SO | `msmdsrv.exe` (Microsoft Multidimensional Server) |
+| Ruta de datos | `C:\Program Files\Microsoft SQL Server\MSAS17.TABULAR\OLAP\Data` |
+| Puerto | Dinámico vía SQL Server Browser (instancia nombrada) |
+
+**Definición versionada en el repo:**
+
+| Archivo | Qué contiene |
+|---|---|
+| `ssas/01_create_modelo.xmla` | TMSL/XMLA que crea el modelo: 8 tablas, 7 relaciones, 10 medidas DAX, data source apuntando al DSN `DW_NORTHWIND` (System.Data.Odbc) |
+| `ssas/02_procesar_modelo.xmla` | Comando `refresh` que carga las filas desde MySQL DW |
+| `ssas/config_servidor_4.md` | Documentación completa del Servidor 4 |
+
+**Cómo se construyó (decisión de diseño defendible):**
+
+El proyecto NO usó la ruta tradicional de Visual Studio + SQL Server Data Tools porque la versión 2022+ tiene un bug conocido con conexiones ODBC a MySQL (el wizard usa un proceso 32-bit y rechaza los modos de impersonación válidos para Tabular 1500+). En lugar de eso:
+
+1. Se escribió el modelo directamente en **TMSL** (formato JSON nativo de SSAS).
+2. Se desplegó vía **SSMS 19 → XMLA Query → F5**.
+3. El archivo `01_create_modelo.xmla` queda en el repo como **fuente de verdad** — el modelo se puede reconstruir desde cero en cualquier máquina con SSAS Tabular instalado.
+
+**Es más limpio que el approach con Visual Studio porque:**
+- El modelo es código versionado (Git diff muestra cualquier cambio).
+- Reproducible: un nuevo desarrollador clona el repo y deploya con 2 clics.
+- Sin dependencia de IDE específico.
+
+### Componentes del modelo semántico Northwind
+
+Para defender ante el jurado qué hay dentro:
+
+**8 tablas** (importadas del DW vía DSN):
+
+```
+fact_ventas         2,155 filas    (hechos: una venta = una línea de pedido)
+dim_tiempo          2,191 filas    (calendario 1994-1999)
+dim_cliente         91             (clientes Northwind)
+dim_producto        77             (catálogo desnormalizado: producto + categoría + proveedor)
+dim_empleado        9              (vendedores)
+dim_geografia       ~70            (combinaciones únicas ciudad/región/país)
+dim_transportista   3              (Speedy Express, United Package, Federal Shipping)
+dim_metas           192            (metas por empleado/año/mes calculadas)
+```
+
+**7 relaciones** (esquema estrella):
+
+```
+fact_ventas[tiempo_sk]        → dim_tiempo[tiempo_sk]
+fact_ventas[cliente_sk]       → dim_cliente[cliente_sk]
+fact_ventas[producto_sk]      → dim_producto[producto_sk]
+fact_ventas[empleado_sk]      → dim_empleado[empleado_sk]
+fact_ventas[geografia_sk]     → dim_geografia[geografia_sk]
+fact_ventas[transportista_sk] → dim_transportista[transportista_sk]
+dim_metas[empleado_sk]        → dim_empleado[empleado_sk]
+```
+
+Todas son **many-to-one** (cardinalidad clásica de estrella).
+
+**10 medidas DAX** centralizadas en `fact_ventas`:
+
+| # | Medida | Fórmula resumida |
+|---|---|---|
+| 1 | Ventas Netas | `SUM(venta_neta)` |
+| 2 | Ventas Año Anterior | `CALCULATE([Ventas Netas], SAMEPERIODLASTYEAR(fecha))` |
+| 3 | Ventas YoY % | `DIVIDE([V.Act] - [V.Ant], [V.Ant])` |
+| 4 | Cantidad Vendida | `SUM(cantidad)` |
+| 5 | % Contribución | `DIVIDE([V.Netas], CALCULATE([V.Netas], ALL))` |
+| 6 | Meta Mensual | `SUM(dim_metas[meta_mensual])` |
+| 7 | Cumplimiento Meta % | `DIVIDE([V.Netas], [Meta Mensual])` |
+| 8 | Días Entrega Promedio | `AVERAGEX(FILTER(...), dias_entrega)` |
+| 9 | Margen Total | `SUM(margen)` |
+| 10 | Clientes Activos | `CALCULATE(DISTINCTCOUNT(cliente_sk), DATESINPERIOD(...365 días...))` |
+
+### Flujo end-to-end resumido
+
+```
+SQL Server Northwind  (OLTP, datos transaccionales)
+        ↓ NiFi Pipeline 1 (espejo 1:1)
+MySQL Staging (3307)
+        ↓ NiFi Pipeline 2 (joins, surrogate keys, medidas)
+MySQL DW (3306) ─── esquema estrella físico
+        ↓ XMLA Refresh (vía DSN ODBC, 64-bit)
+SSAS Tabular Server (Northwind_Semantico) ─── modelo semántico in-memory
+        ↓ Microsoft Analysis Services connector
+Tableau Desktop (10 hojas + 3 dashboards) ─── visualización al usuario final
+```
+
+Cada flecha es un componente del proyecto. Cada caja es un servidor independiente. Esta separación NO es "complicación innecesaria" — es la arquitectura BI clásica que escala a cualquier tamaño.
+
+---
+
 ## Parte 2 — Las 10 preguntas de negocio (Tableau)
 
 | # | Pregunta | Hoja Tableau | Estado |

@@ -256,7 +256,7 @@
               },
               {
                 "name": "Ultima Compra",
-                "expression": "MAX ( dim_tiempo[fecha] )",
+                "expression": "MAXX ( fact_ventas, RELATED ( dim_tiempo[fecha] ) )",
                 "formatString": "yyyy-mm-dd"
               },
               {

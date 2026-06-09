@@ -253,6 +253,26 @@
                 "name": "Clientes Activos",
                 "expression": "CALCULATE ( DISTINCTCOUNT ( fact_ventas[cliente_sk] ), DATESINPERIOD ( dim_tiempo[fecha], MAX ( dim_tiempo[fecha] ), -365, DAY ) )",
                 "formatString": "#,##0"
+              },
+              {
+                "name": "Ultima Compra",
+                "expression": "MAX ( dim_tiempo[fecha] )",
+                "formatString": "yyyy-mm-dd"
+              },
+              {
+                "name": "Dias Sin Comprar",
+                "expression": "DATEDIFF ( [Ultima Compra], DATE ( 1998, 5, 6 ), DAY )",
+                "formatString": "#,##0"
+              },
+              {
+                "name": "Es Inactivo",
+                "expression": "IF ( [Dias Sin Comprar] > 365, 1, 0 )",
+                "formatString": "0"
+              },
+              {
+                "name": "En Riesgo",
+                "expression": "IF ( [Dias Sin Comprar] > 180 && [Dias Sin Comprar] <= 365, 1, 0 )",
+                "formatString": "0"
               }
             ]
           }
